@@ -81,19 +81,24 @@ class BlendEnv_Omni(CMDP):
     
     def __init__(self, env_id, **kwargs):
         """
-        
-        Args:
-            M (int) : Penalty constant incurred for breaking in/out rule. Defaults to 1e3. Set to 0 for "normal" behavior
-            Q (int) : Penalty constant incurred for breaking concentrations reqs. Defaults to 1e3. Set to 0 for "normal" behavior
-            P (int) : Penalty constant incurred for breaking tank bounds reqs. Defaults to 1e2. Set to 0 for "normal" behavior
-            B (int) : Penalty constant incurred for breaking buy/sell bounds reqs. Defaults to 1e2. Set to 0 for "normal" behavior
-            Z (int) : Positive reward multiplier to emphasize that "selling is good". Defaults to 1e3. Set to 1 for "normal" behavior
-            D (int) : Multiplier representing the influence of the depth. Defaults to 1. Set to 0 for "normal" behavior
-            Y (int) : Positive reward multiplier to emphasize that "buying is good". Defaults to 1. Set to 1 for "normal" behavior
-            v (bool): Verbose. Defaults to False
-            connections (dict) : Specifies connection graph and tank names
-            action_samples (dict) : Action example for action space definition
-        
+            Initialize the BlendEnv_Omni environment.
+
+            Args:
+                env_id (str): Identifier for the environment, which determines the layout. See _support_envs
+                alpha (float): Fixed pipeline utilization cost
+                beta (float): Proportional pipeline utilization cost
+                v (bool): Verbose flag for logging and debugging.
+                M (int): Penalty for violating the in/out rule.
+                Q (int): Penalty for violating concentration requirements.
+                P (int): Penalty for exceeding tank capacity limits.
+                B (int): Penalty for exceeding buy/sell bounds.
+                Z (int): Reward multiplier emphasizing selling product.
+                D (int): Multiplier influencing populating tanks. See self.depths
+                L0_pen (float): L0 norm component for violating "P" and "B" penalties
+                MAXFLOW (float): Action upper bound (lower bound is 0).
+                max_pen_violations (int): Maximum number of penalty violations allowed. 
+                                            If set to <999, the episode will truncate early if this number of vialoations is reached.
+                illeg_act_handling (str): Strategy for handling illegal actions. "disable" or "prop"
         """
         super().__init__(env_id)
         
@@ -173,7 +178,7 @@ class BlendEnv_Omni(CMDP):
     def step(self, action: th.Tensor):
         """
         The state is kept track of in a human-readable dict "self.state"
-        After updating it from the action, we flatten it and return it along with the reward and "done"
+        After updating it from the action, we flatten it and return it along with the reward, costs, truncated and terminated informations
 
         Args:
             action (torch.Tensor): model output
@@ -552,7 +557,6 @@ class BlendEnv_Omni(CMDP):
     
 
     def update_reward1(self, action):
-        # Args: action (dict): See action_sample.json .
         Q_float = Q_bin = 0
         if "blend_blend" in action.keys():
             L = ["source_blend", "blend_blend", "blend_demand"]
@@ -724,7 +728,8 @@ class BlendEnv_Omni(CMDP):
             print(*args)
         return
     
-    def spec_log(self, logger: Logger) -> None: # Called at the end of each epoch
+    def spec_log(self, logger: Logger) -> None: 
+        # Omnisafe method called at the end of each epoch. Averaged values are logged
         for key, value in self.env_spec_log.items():
             logger.store({key: value})
             self.env_spec_log[key] = 0.0
