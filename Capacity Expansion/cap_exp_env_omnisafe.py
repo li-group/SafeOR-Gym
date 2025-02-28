@@ -244,14 +244,19 @@ class Cap_exp_env_Omni(CMDP):
         self.D = 10**3
         self.P = 10**3
         self.T = 1
-        self.maxgen = {("i1","r1"):10,("i1","r2"):10}
-        self.transdict = {"1":("r1","r2")}
+        self.maxgen = {"i1":{ "r1": 10,"r2":10}}
+        self.transdict = {"1": "r1_r2"}
         self.installcost = {"generators" : {"i1":0},"transmission":{"1":0}}
         with open("./action_sample_base.json" ,"r") as f:
             action = f.read()
         self.action_sample = json.loads(action)
-        print(kwargs)
+        #print(kwargs)
         assign_env_config(self, kwargs)
+        for k in self.transdict.keys():
+            val = self.transdict[k]
+            if(isinstance(val, str)): 
+                v = tuple(val.split("_", 1))
+                self.transdict[k] = v
         self.generators = list(self.gencap.keys())
         self.transmission_lines = list(self.transcap.keys())
         self.env_spec_log = {'Total penalty: Generator lower bound violations':0,'Number of Generator lower bound violations':0,
@@ -264,7 +269,8 @@ class Cap_exp_env_Omni(CMDP):
         self.reset()
         #print(self.flatt_state.shape[0])
         self.flatt_state, self.mapping_obs = flatten_and_track_mappings(self.state)
-        self.obs_high = np.concatenate([np.repeat(100,len(self.generators)*len(self.regions)),np.repeat(1,len(self.transmission_lines)),np.repeat(max(self.demand.values()),len(self.regions)),np.repeat(self.T,1)])
+        max_demand_value = max(max(region_demand.values()) for region_demand in self.demand.values())
+        self.obs_high = np.concatenate([np.repeat(100,len(self.generators)*len(self.regions)),np.repeat(1,len(self.transmission_lines)),np.repeat(max_demand_value,len(self.regions)),np.repeat(self.T,1)])
         #print(self.state)
         #print(self.flatt_state)
         #print(self.mapping_obs)
@@ -325,7 +331,7 @@ class Cap_exp_env_Omni(CMDP):
         self.get_new_start_state()
         self.truncated  = self.terminated = False
         self.penalty = 0
-        print(self.state)
+        #print(self.state)
 
         self.flatt_state, _ = flatten_and_track_mappings(self.state)
 
@@ -336,19 +342,19 @@ class Cap_exp_env_Omni(CMDP):
     def check_bounds_cost(self,action,cost):
         for i in self.generators:
             for r in self.regions:
-                print(action["addgen"])
+                #print(action["addgen"])
                 if(action["addgen"][(i,r)]<0):
                     cost+=(action["addgen"][(i,r)])**2*self.D+self.P
                     self.pens_step['Total penalty: Generator lower bound violations']+=(action["addgen"][(i,r)])**2*self.D+self.P
                     self.pens_step['Number of Generator lower bound violations']+=1
                     action["addgen"][(i,r)] = 0
-                if(action["addgen"][(i,r)]+self.state["num_gen"][i,r]>self.maxgen[i,r]):
+                if(action["addgen"][(i,r)]+self.state["num_gen"][i,r]>self.maxgen[i][r]):
                     #print(cost)
-                    cost+=(-self.maxgen[i,r]+self.state["num_gen"][i,r]+action["addgen"][(i,r)])**2*self.D+self.P
+                    cost+=(-self.maxgen[i][r]+self.state["num_gen"][i,r]+action["addgen"][(i,r)])**2*self.D+self.P
                     #print(cost)
-                    self.pens_step['Total penalty: Generator upper bound violations']+=(-self.maxgen[i,r]+self.state["num_gen"][i,r]+action["addgen"][(i,r)])**2*self.D+self.P
+                    self.pens_step['Total penalty: Generator upper bound violations']+=(-self.maxgen[i][r]+self.state["num_gen"][i,r]+action["addgen"][(i,r)])**2*self.D+self.P
                     self.pens_step['Number of Generator upper bound violations']+=1
-                    action["addgen"][(i,r)] = self.maxgen[i,r]-self.state["num_gen"][i,r]
+                    action["addgen"][(i,r)] = self.maxgen[i][r]-self.state["num_gen"][i,r]
         if(len(self.transmission_lines)>0):
              for l in self.transmission_lines:
                 if(action["powflow"][l]<-self.transcap[l]):
@@ -425,7 +431,7 @@ class Cap_exp_env_Omni(CMDP):
         return action
     def update_dem(self):
         for r in self.regions:
-            self.state["Dem"][r] = self.demand[r,str(self.t)]
+            self.state["Dem"][r] = self.demand[r][str(self.t)]
     def set_seed(self, seed: int):
         random.seed(seed)
     def spec_log(self, logger: Logger) -> None: 
@@ -436,6 +442,7 @@ class Cap_exp_env_Omni(CMDP):
     def render(self, mode='human'):
         print("state:",f"{self.state}")
         print("cost:",f"{self.cost_ep}")
+        print("Specification:",f"{self.env_spec_log}")
     def close(self):
         pass    
     @property
@@ -443,14 +450,16 @@ class Cap_exp_env_Omni(CMDP):
         """The max steps per episode."""
         return self.T
     
-'''
-config = {'T' : 2,'regions' : ["r1","r2"],
-          'gencap' : {"i1":10},
-          'transcap' : {"1":10},
-           'maxgen': {("i1","r1"):1,("i1","r2"):1},
-          'installcost' : {"generators" : {"i1":10},"transmission":{"1":0.1}},
-          'demand':{("r1",1):5,("r2",1):5,("r1",2):20,("r2",2):20},
-          'transdict' : {"1":("r1","r2")}}
+
+'''config = {
+    'T': 2,
+    'regions': ["r1", "r2"],
+    'gencap': {"i1": 10},
+    'transcap': {"1": 10},
+    'maxgen': {"i1":{ "r1": 1,"r2":1}},
+    'installcost': {"generators": {"i1": 10}, "transmission": {"1": 0.1}},
+    'demand': {"r1":{"1": 5,"2":5},"r2":{"1": 10,"2":30}},
+    'transdict': {"1": "r1_r2"}}
 
 
 env = Cap_exp_env_Omni('Capacity-Expansion',**config)
@@ -463,7 +472,7 @@ action_1 = th.tensor([1,1,5]).to("cuda:0")
 state, reward,cost, done,truncated, info = env.step(action_1)
 env.render()
 print(reward)
-
+print(env.state)
 action_1 = th.tensor([1,1,5]).to("cuda:0")
 state, reward,cost, done,truncated, info = env.step(action_1)
 env.render()
@@ -481,10 +490,10 @@ if __name__ == "__main__":
     'regions': ["r1", "r2"],
     'gencap': {"i1": 10},
     'transcap': {"1": 10},
-    'maxgen': {("i1", "r1"): 1, ("i1", "r2"): 1},
+    'maxgen': {"i1":{ "r1": 1,"r2":1}},
     'installcost': {"generators": {"i1": 10}, "transmission": {"1": 0.1}},
-    'demand': {("r1", "1"): 5, ("r2", "1"): 5, ("r1", "2"): 20, ("r2", "2"): 20},
-    'transdict': {"1": ("r1", "r2")}}
+    'demand': {"r1":{"1": 5,"2":5},"r2":{"1": 10,"2":10}},
+    'transdict': {"1": "r1_r2"}}
     cfg = cfg_to_omni(env_config,cfg_id=77, layout=layout, total_steps=3e5, algo=ALGO)
     #print(cfg)
     #cfg["env_cfgs"]["v"] = False

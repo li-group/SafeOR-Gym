@@ -129,22 +129,12 @@ defaults:
   env_cfgs:
     T: 2
     demand:
-      ? !!python/tuple
-      - r1
-      - '1'
-      : 5
-      ? !!python/tuple
-      - r1
-      - '2'
-      : 20
-      ? !!python/tuple
-      - r2
-      - '1'
-      : 5
-      ? !!python/tuple
-      - r2
-      - '2'
-      : 20
+      r1:
+        '1': 5
+        '2': 5
+      r2:
+        '1': 10
+        '2': 10
     gencap:
       i1: 10
     installcost:
@@ -153,24 +143,16 @@ defaults:
       transmission:
         '1': 0.1
     maxgen:
-      ? !!python/tuple
-      - i1
-      - r1
-      : 1
-      ? !!python/tuple
-      - i1
-      - r2
-      : 1
+      i1:
+        r1: 1
+        r2: 1
     regions:
     - r1
     - r2
     transcap:
       '1': 10
     transdict:
-      '1': !!python/tuple
-      - r1
-      - r2
-
+      '1': r1_r2
 
 SafeMetaDrive:
   # training configurations
