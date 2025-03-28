@@ -1,27 +1,18 @@
-# Importing libraries
-import numpy as np
-from pyomo.environ import *
-#from pyomo import *
-#import pyomo.environ as pyo
-from pyomo.opt import SolverFactory
-from pyomo.contrib.iis import *
-import random
-import json
 
-from stable_baselines3 import PPO
-#from bayes_opt import acquisition
-
-import numpy as np
 import gymnasium as gym
-# from gymnasium import spaces
-from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete
-from gymnasium.utils import seeding
-import json
-import torch as th
-import torch.nn as nn
-import torch.nn.functional as F
-import os, sys
-from PIL import Image, ImageDraw, ImageFont
+import numpy as np
+
+def assign_env_config(self, kwargs):
+    print("Assigning configuration...")
+    for key, value in kwargs.items():
+        print(f"Trying to set {key} to {value}")
+        if hasattr(self, key):
+            print(f"Setting {key} to {value}")
+            setattr(self, key, value)
+        else:
+            print(f"{self} has no attribute, {key}")
+            raise AttributeError(f"{self} has no attribute, {key}")
+
 
 def flatten_dict(dictionary, parent_key='', separator=';'):
     """
@@ -97,22 +88,50 @@ def flatten_and_track_mappings(dictionary, separator=';'):
     flattened_array = np.array(flattened_values, dtype=np.float32)
     return flattened_array, mappings
 
-import gymnasium as gym
-import numpy as np
-# from your_cap_exp_helpers import (
-#     flatten_and_track_mappings, reconstruct_dict,
-#     nested_set, flatten_dict, convert_dict_to_tuple_keys
-# )
+
+
+def convert_dict_to_tuple_keys(data):
+    result = {}
+    for outer_key, value in data.items():
+        if isinstance(value, dict):
+            # If the value is a dictionary, iterate over its items
+            for inner_key, inner_value in value.items():
+                result[(outer_key, inner_key)] = inner_value
+        else:
+            # If the value is not a dictionary, store it with the outer_key as a tuple
+            result[(outer_key)] = value
+    return result
+
+
+def nested_set(dic, keys, value):
+    for key in keys[:-1]:
+        dic = dic.setdefault(key, {})
+    dic[keys[-1]] = value
+    return(dic)
+def reconstruct_dict(flattened_array, mappings, separator=';'):
+    reconstructed_dict = {}
+    for index, keys in mappings:
+        nested_set(reconstructed_dict, keys, flattened_array[index])
+    return reconstructed_dict
+def get_jsons(layout):
+    import json
+    with open(f"./configs/json/connections_{layout}.json" ,"r") as f:
+        connections_s = f.readline()
+    connections = json.loads(connections_s)
+
+    with open(f"./configs/json/action_sample_{layout}.json" ,"r") as f:
+        action_sample_s = f.readline()
+    action_sample = json.loads(action_sample_s)
+    return connections, action_sample
+
 
 class InvMgmtEnv(gym.Env):
     """
     Inventory Management Environment for multi-echelon supply chain,
-    matching the function names/structure from the capacity-expansion environment.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, **kwargs):
         """
-        Functions like Cap_exp_env.__init__:
          1) assign_env_config
          2) set penalty parameters
          3) define placeholder for spaces
@@ -120,7 +139,7 @@ class InvMgmtEnv(gym.Env):
         """
         super().__init__()
         # 1) Assign environment config
-        self.assign_env_config(kwargs)
+        self.env_config(kwargs)
 
         # 2) Penalty multipliers
         self.eps = 1e-3    # small action threshold
@@ -136,11 +155,8 @@ class InvMgmtEnv(gym.Env):
 
         # print("Reset observation shape:", self.observation_space.shape)
         
-
-
-    def assign_env_config(self, kwargs):
+    def env_config(self, kwargs):
         """
-        Mirrors cap_exp_env.assign_env_config, but uses the inventory defaults:
         - Uses set defaults
         - Overwrites from kwargs
         - Raises AttributeError if attribute isn't recognized
@@ -200,9 +216,13 @@ class InvMgmtEnv(gym.Env):
 
         # Lead times remain the same if you like your structure:
         # (unmodified)
+        # self.lead_times = {
+        #     (2,1):5, (3,1):3, (4,2):8, (5,2):9, (6,2):11,
+        #     (4,3):10, (6,3):12, (7,4):0, (7,5):1, (8,5):2, (8,6):0
+        # }
         self.lead_times = {
-            (2,1):5, (3,1):3, (4,2):8, (5,2):9, (6,2):11,
-            (4,3):10, (6,3):12, (7,4):0, (7,5):1, (8,5):2, (8,6):0
+            (2,1):1, (3,1):1, (4,2):1, (5,2):1, (6,2):1,
+            (4,3):1, (6,3):1, (7,4):1, (7,5):1, (8,5):1, (8,6):1
         }
 
         # Higher operating cost so that producing is not too cheap
@@ -222,8 +242,8 @@ class InvMgmtEnv(gym.Env):
 
         # Demand parameters: higher mean so there's a reason to produce
         self.demand_parameters = {
-            'mean': 50,
-            'std': 5,
+            'mean': 30,
+            'std': 2,
             'p': 0.7,
             # We'll rely on environment seeding for the random seed
         }
@@ -245,14 +265,6 @@ class InvMgmtEnv(gym.Env):
         self.j_in = {1:[2,3], 2:[4,5,6], 3:[4,6], 4:[7], 5:[7,8], 6:[8]}
         self.j_out = {1:[0], 2:[1], 3:[1], 4:[2,3], 5:[2], 6:[2,3], 7:[4,5], 8:[5,6]}
 
-
-        # Overwrite with user config
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-            else:
-                raise AttributeError(f"{self} has no attribute, {key}")
-
         # Build route lists
         self.main_nodes = list(range(
             self.num_markets,
@@ -267,7 +279,6 @@ class InvMgmtEnv(gym.Env):
 
     def get_new_start_state(self):
         """
-        Matches Cap_exp_env.get_new_start_state:
         - Setup arrays
         - Generate demand
         - Build self.state dict
@@ -278,7 +289,7 @@ class InvMgmtEnv(gym.Env):
         self.Tt = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}  # pipeline
         self.R = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}   # reorder
         self.Rp = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}  # arrived
-        self.Ss = {rt: np.zeros(self.T+2) for rt in self.retailer_routes}    # sales
+        self.Ss = {rt: np.zeros(self.T+1) for rt in self.retailer_routes}    # sales
         self.Bb = {rt: np.zeros(self.T+2) for rt in self.retailer_routes}    # backlog
         self.Dd = {rt: np.zeros(self.T+1) for rt in self.retailer_routes}    # demand
 
@@ -341,12 +352,11 @@ class InvMgmtEnv(gym.Env):
             dtype=np.float32
         )
 
-        print("act_low", act_low)
-        print("act_high", act_high)
+        # print("act_low", act_low)
+        # print("act_high", act_high)
 
     def reset(self, seed=None, options=None):
         """
-        Matches Cap_exp_env.reset:
          - set t=0, cost=0, reward=0, terminated=False
          - call get_new_start_state
          - flatten
@@ -390,11 +400,9 @@ class InvMgmtEnv(gym.Env):
                 self.Dd[rt][self.t] = self.demand[rt][self.t]
 
 
-    def check_bounds_cost(self, action_dict, next_obs=None):
+    def check_action_bounds_cost(self, action_dict):
         """
-        1) Clip actions if out of [0, route_capacity], apply penalty.
-        2) If next_obs is provided, clip out-of-bounds (below 0 or above obs_high)
-           and apply penalty.
+        Clip actions if out of [0, route_capacity], apply penalty.
         """
         # Action checks
         for rt in self.reordering_routes:
@@ -409,6 +417,13 @@ class InvMgmtEnv(gym.Env):
                 self.cost += diff**2 + self.P
                 action_dict[rt] = max_val
 
+        return action_dict
+    
+    def check_obs_bounds_cost(self, next_obs):
+        """
+        If next_obs is provided, clip out-of-bounds (below 0 or above obs_high)
+           and apply penalty.
+        """
         # Observation checks
         if next_obs is not None:
             low_b = self.observation_space.low
@@ -423,7 +438,7 @@ class InvMgmtEnv(gym.Env):
                     self.cost += diff**2 + self.P
                     next_obs[i] = high_b[i]
 
-        return action_dict, next_obs
+        return next_obs
 
     def calculate_reward(self):
         """
@@ -463,7 +478,7 @@ class InvMgmtEnv(gym.Env):
 
         # 3) Retail sales + backlog penalty
         for rt in self.retailer_routes:
-            b_now = self.Bb[rt][t]
+            b_now = self.Bb[rt][t + 1]
             backlog_penalty += b_now * self.unfulfilled_utility_penalty.get(rt, 0.0)
             # Also final sale
             s_now = self.Ss[rt][t]
@@ -492,7 +507,7 @@ class InvMgmtEnv(gym.Env):
         self.cost = 0.0
         self.total_cost = 0.0
 
-        print("raw_action",raw_action)
+        # print("raw_action",raw_action)
         # 1) Convert action
         if isinstance(raw_action, dict):
             action_dict = raw_action
@@ -507,9 +522,9 @@ class InvMgmtEnv(gym.Env):
         action_dict = self.sanitize_action(action_dict)
 
         # 3) check_bounds_cost for actions
-        action_dict, _ = self.check_bounds_cost(action_dict)
+        action_dict= self.check_action_bounds_cost(action_dict)
 
-        print("action_dict",action_dict)
+        # print("action_dict",action_dict)
         
         # 4) environment dynamics
         self.t += 1
@@ -545,7 +560,7 @@ class InvMgmtEnv(gym.Env):
                 for k in self.j_in.get(node, [])
             )
             sold = sum(
-                self.Ss.get((node,k), np.zeros(self.T+2))[t]
+                self.Ss.get((node,k), np.zeros(self.T+1))[t - 1]
                 for k in self.j_out.get(node, [])
             )
             idx = node - self.num_markets
@@ -564,12 +579,12 @@ class InvMgmtEnv(gym.Env):
             for succ in self.j_out.get(node, []):
                 needed = self.Dd[(node,succ)][t] + self.Bb[(node,succ)][t]
                 made_sale = min(needed, avail)
-                self.Ss[(node,succ)][t+1] = made_sale
+                self.Ss[(node,succ)][t] = made_sale
                 avail -= made_sale
 
         # Backlog
         for rt in self.retailer_routes:
-            self.Bb[rt][t+1] = self.Bb[rt][t] + self.Dd[rt][t] - self.Ss[rt][t+1]
+            self.Bb[rt][t+1] = self.Bb[rt][t] + self.Dd[rt][t] - self.Ss[rt][t]
 
         # 5) calculate_reward in a separate function
         self.calculate_reward()  # sets self.cost & self.reward
@@ -586,9 +601,9 @@ class InvMgmtEnv(gym.Env):
             lt = self.lead_times[rt]
             pipeline_vals = []
             for i in range(lt):
-                idx_t = (t - lt) + i
+                idx_t = (t - lt) + i + 1
                 if idx_t >= 0:
-                    pipeline_vals.append(self.R[rt][idx_t])
+                    pipeline_vals.append(self.Tt[rt][idx_t])
                 else:
                     pipeline_vals.append(0.0)
             # Make sure this line is INSIDE the for-loop
@@ -620,7 +635,7 @@ class InvMgmtEnv(gym.Env):
         # Debug: Print the shape and compare it to observation_space.shape
 
         # 7) check_bounds_cost for observations
-        _, clipped_obs = self.check_bounds_cost(action_dict, next_obs=self.flatt_state)
+        clipped_obs = self.check_obs_bounds_cost(next_obs=self.flatt_state)
         self.flatt_state = clipped_obs
 
         # 8) check if done
@@ -640,3 +655,17 @@ class InvMgmtEnv(gym.Env):
 
     def close(self):
         pass
+
+
+# Manual Run
+# env = InvMgmtEnv()
+# obs, info = env.reset()
+# print("Manual rollout start...")
+# for i in range(1):
+#     action = env.action_space.sample()
+#     obs, reward, done, truncated, info = env.step(action)
+#     print(f"Step {i + 1}, obs shape={obs.shape}, reward={reward}, done={done}")
+#     print(info)
+#     if done:
+#         obs, info = env.reset()
+#         print("Episode reset")

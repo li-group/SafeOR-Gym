@@ -1,0 +1,110 @@
+{
+    "liq_prod_data": {
+        "LIN": {
+            "1": 1333.3333333333333,
+            "2": 1066.6666666666667,
+            "3": 1133.3333333333333,
+            "4": 1106.6666666666667,
+            "5": 986.6666666666666
+        },
+        "LOX": {
+            "1": 333.3333333333333,
+            "2": 272.0,
+            "3": 294.6666666666667,
+            "4": 309.8666666666667,
+            "5": 236.79999999999998
+        },
+        "LAR": {
+            "1": 23.333333333333332,
+            "2": 19.311999999999998,
+            "3": 20.626666666666665,
+            "4": 21.070933333333333,
+            "5": 16.339199999999998
+        }
+    },
+    "delta": {
+        "OFF": 0,
+        "Liquid_SU": 0,
+        "Liquid_Prod": 36
+    },
+    "products": [
+        "LIN",
+        "LOX",
+        "LAR"
+    ],
+    "fixed_cost": [36],
+    "dynamic_cost": [0.24192],
+    "gamma": {
+        "OFF_LIN": 0,
+        "Liquid_SU_LIN": 0,
+        "Liquid_Prod_LIN": 0.24192,
+        "OFF_LOX": 0,
+        "Liquid_SU_LOX": 0,
+        "Liquid_Prod_LOX": 0.24192,
+        "OFF_LAR": 0,
+        "Liquid_SU_LAR": 0,
+        "Liquid_Prod_LAR": 0.24192
+    },
+    "y_i": {
+        "OFF": 1,
+        "Liquid_SU": 0,
+        "Liquid_Prod": 0
+    },
+    "IV_i": {
+        "LIN": 200,
+        "LOX": 100,
+        "LAR": 50
+    },
+    "IV_u": {
+        "LIN": 25000,
+        "LOX": 20000,
+        "LAR": 4000
+    },
+    "IV_l": {
+        "LIN": 0,
+        "LOX": 0,
+        "LAR": 0
+    },
+    "IV_f": {
+        "LIN": 0,
+        "LOX": 0,
+        "LAR": 0
+    },
+    "theta_minon": [
+        0,
+        1,
+        2,
+        3,
+        4
+    ],
+    "theta_minoff": [
+        0,
+        1,
+        2,
+        3,
+        4
+    ],
+    "theta_startup": [
+        0,
+        1
+    ],
+    "total_hours":[168
+    ],
+    "interval_hours": [1
+    ],
+    "z_history": {
+        "OFF_Liquid_SU_-4": 0,
+        "OFF_Liquid_SU_-3": 0,
+        "OFF_Liquid_SU_-2": 0,
+        "OFF_Liquid_SU_-1": 0,
+        "Liquid_SU_Liquid_Prod_-4": 0,
+        "Liquid_SU_Liquid_Prod_-3": 0,
+        "Liquid_SU_Liquid_Prod_-2": 0,
+        "Liquid_SU_Liquid_Prod_-1": 0,
+        "Liquid_Prod_OFF_-4": 0,
+        "Liquid_Prod_OFF_-3": 0,
+        "Liquid_Prod_OFF_-2": 0,
+        "Liquid_Prod_OFF_-1": 0
+    }
+
+}

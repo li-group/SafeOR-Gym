@@ -1,0 +1,77 @@
+{
+    "ASU1": {
+        "initial_integration_periods": [
+            [
+                10,
+                20
+            ],
+            [
+                25,
+                27
+            ]
+        ],
+        "start_range": [
+            1,
+            5
+        ],
+        "duration_range": [
+            4,
+            6
+        ],
+        "renewable_factor": 0.1,
+        "size1": 250,
+        "size2": 200,
+        "noise_tuning_factor1": 0.001,
+        "noise_tuning_factor2": 0.002
+    },
+    "ASU2": {
+        "initial_integration_periods": [
+            [
+                4,
+                8
+            ],
+            [
+                10,
+                17
+            ]
+        ],
+        "start_range": [
+            3,
+            6
+        ],
+        "duration_range": [
+            3,
+            5
+        ],
+        "renewable_factor": 0.03,
+        "size1": 189,
+        "size2": 190,
+        "noise_tuning_factor1": 0.001,
+        "noise_tuning_factor2": 0.002
+    },
+    "ASU3": {
+        "initial_integration_periods": [
+            [
+                7,
+                14
+            ],
+            [
+                30,
+                34
+            ]
+        ],
+        "start_range": [
+            5,
+            6
+        ],
+        "duration_range": [
+            1,
+            4
+        ],
+        "renewable_factor": 0.09,
+        "size1": 170,
+        "size2": 160,
+        "noise_tuning_factor1": 0.001,
+        "noise_tuning_factor2": 0.002
+    }
+}
