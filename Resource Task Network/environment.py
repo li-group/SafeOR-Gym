@@ -4,6 +4,7 @@ import random
 import yaml
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
 from types import SimpleNamespace
+
 import numpy as np
 
 import torch
@@ -153,10 +154,7 @@ class RTNEnv(CMDP):
         self.max_batch = np.array(self.max_batch, dtype=np.float32)
 
         # Define the action space
-        self.raw_action_space = gym.spaces.Dict({
-            "run": gym.spaces.MultiBinary(self.num_tasks),
-            "batch": gym.spaces.Box(low=self.min_batch, high=self.max_batch, dtype=np.float32)
-        })
+        self.raw_action_space = gym.spaces.Box(low=self.min_batch, high=self.max_batch, dtype=np.float32)
         self._action_space = gym.spaces.utils.flatten_space(self.raw_action_space)
 
 
@@ -222,14 +220,15 @@ class RTNEnv(CMDP):
         return np.concatenate(state_parts)
 
 
-    def _check_equipment_constraints(self, action_run: np.ndarray, action_batch: np.ndarray) -> bool:
+    def _check_equipment_constraints(self, action_batch: np.ndarray) -> bool:
         # Check that equipment usage does not exceed available capacity.
         equipment_usage = {}
         for i, task in enumerate(self.tasks):
-            if action_run[i]:
+            if np.abs(action_batch[i]) >= 1e-4:
                 eq = task.get("equipment", None)
                 if eq is not None:
                     equipment_usage[eq] = equipment_usage.get(eq, 0.0) + action_batch[i]
+        
         for eq, usage in equipment_usage.items():
             limit = self.equipment_limits.get(eq, np.inf)
             if usage > limit:
@@ -259,25 +258,25 @@ class RTNEnv(CMDP):
             return False
         return True
 
-    def _compute_resource_change(self, action_run: np.ndarray, action_batch: np.ndarray) -> np.ndarray:
+    def _compute_resource_change(self, action_batch: np.ndarray) -> np.ndarray:
         # Compute the total change in resources based on task stoichiometry.
         total_change = np.zeros_like(self.inventory, dtype=np.float32)
         
         for i, task in enumerate(self.task_stoichs):
-            if action_run[i]:
+            if np.abs(action_batch[i]) >= 1e-4:
                 stoich_dict = task.get("stoich", {})
                 stoich_vec = np.array([stoich_dict.get(r, 0.0) for r in self.resources], dtype=np.float32)
                 total_change += action_batch[i] * stoich_vec
         
         return total_change
 
-    def _compute_cost(self, action_run: np.ndarray, action_batch: np.ndarray) -> float:
+    def _compute_cost(self, action_batch: np.ndarray) -> float:
         utility_prices = self.utility_costs.get(self.t, {})  # e.g. {'utility_1': 0.8, 'utility_2': 1.5}
 
         # Sum of operating cost for the tasks that are run.
         total_cost = 0.0
         for i, task in enumerate(self.tasks):
-            if action_run[i] == 0:
+            if np.abs(action_batch[i]) <= 1e-4:
                 continue
             batch = action_batch[i]
             utility_usage = self.task_utilities[i]
@@ -311,29 +310,28 @@ class RTNEnv(CMDP):
 
     def _transition(self, action) -> Tuple[np.ndarray, float, float, bool, bool]:
         # Extract action details.
-        action_run = np.array(action.get("run"), dtype=np.int32)
-        action_batch = np.array(action.get("batch"), dtype=np.float32)
+        action_batch = np.array(action, dtype=np.float32)
         
         # Force batch size to zero if task is not run.
-        action_batch = action_run * action_batch
+        #action_batch = action_batch - action_batch[np.abs(action_batch) <= 1e-4]
 
-        resource_change = self._compute_resource_change(action_run, action_batch)
+        resource_change = self._compute_resource_change(action_batch)
         new_inventory = self.inventory + resource_change
 
         # Feasibility checks.
-        equip_ok = self._check_equipment_constraints(action_run, action_batch)
+        equip_ok = self._check_equipment_constraints(action_batch)
         inv_ok = self._check_inventory_bounds(new_inventory)
         demand_ok = self._check_demand_satisfaction(new_inventory)
 
         feasible = equip_ok and inv_ok and demand_ok
 
         if not feasible:
-            cost = self._compute_cost(action_run, action_batch)
+            cost = self._compute_cost(action_batch)
             reward = -1e6 - cost  # heavy penalty for infeasibility
             truncated = True
             new_inventory = self.inventory.copy()  # inventory remains unchanged on infeasible actions
         else:
-            cost = self._compute_cost(action_run, action_batch)
+            cost = self._compute_cost(action_batch)
             reward = self._compute_reward(new_inventory, cost)
             truncated = False
             
@@ -355,7 +353,7 @@ class RTNEnv(CMDP):
 
         # Schedule new task outputs for future
         for i in range(self.num_tasks):
-            if action_run[i] == 0:
+            if np.abs(action_batch[i]) <=1e-4:
                 continue
             tau = self.task_taus[i]
             batch = action_batch[i]
@@ -447,7 +445,6 @@ class RTNEnv(CMDP):
 
         # Extract optimal task schedule and batch sizes
         optimal_actions = {
-            "run": {(i, t): po.value(model.N[i, t]) for i in model.I for t in model.T},
             "batch": {(i, t): po.value(model.E[i, t]) for i in model.I for t in model.T},
             "objective": po.value(model.obj)
         }
