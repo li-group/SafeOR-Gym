@@ -10,7 +10,7 @@ import numpy as np
 
 import scipy.stats as stats
 from or_gym.utils import assign_env_config
-from or_gym.envs.power_system.forecast import get_random_25hr_forecast
+# from or_gym.envs.power_system.forecast import get_random_25hr_forecast
 
 import gymnasium as gym
 from gymnasium.spaces.utils import flatten_space
@@ -53,11 +53,13 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.env_id = env_id
         # self.env = self
 
-        self.env_spec_log = {}
+        self.log1 = {"test_n_violation": 0}  #todo
         self.verbose = False
 
-        self.horizon = 24
-        self._max_episode_steps = self.horizon
+        self.penalty_factor = 100
+
+        self.T = 24
+        self._max_episode_steps = self.T
         self.num_gen = 5
         self.generators = range(self.num_gen)
         if self.env_id == 'UC-v0':
@@ -104,6 +106,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.truncated = False
         self.reward = 0
         self.cost = 0
+        self.penalty = 0
 
         # default forecast
         self.model_type = 'normal'
@@ -159,6 +162,7 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         self.reset()
 
+        # todo: change the action bounds to -1 and 1
         if env_id == 'UC-v0':
             self.raw_action_space = gym.spaces.Dict({
                 "on_off": gym.spaces.MultiBinary(self.num_gen),
@@ -193,7 +197,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         else:
             raise ValueError(f"Unknown env_id: {env_id}")
 
-    def _get_state(self) -> np.ndarray:
+    def _get_state(self, mode="arr") -> np.ndarray:
         if self.env_id == 'UC-v0':
             obs_dict = {
                 "u": self.u_seq,
@@ -216,7 +220,13 @@ class UnitCommitmentMasterEnv(gym.Env):
                                       self.pi])
         else:
             raise NotImplementedError
-        return obs_arr
+
+        if mode == "dict":
+            return obs_dict
+        elif mode == "arr":
+            return obs_arr
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         if seed is not None:
@@ -226,6 +236,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.truncated = False
         self.reward = 0
         self.cost = 0
+        self.penalty = 0
 
         # Bus assumed to be 1 only, drop network constraints
         self.pi = self.pi0
@@ -299,12 +310,16 @@ class UnitCommitmentMasterEnv(gym.Env):
         sum_w = w_new + np.array([np.sum(self.w_seq[i][:-1]) for i in self.generators])
         UT_violation = sum_v > u_new
         DT_violation = sum_w > (1 - u_new)
-        return UT_violation, DT_violation
+        UT_cost = np.sum(np.maximum(sum_v - u_new, 0))  # sum_v > u_new
+        DT_cost = np.sum(np.maximum(sum_w - (1 - u_new), 0))  # sum_w > (1 - u_new)
+        return UT_violation, DT_violation, UT_cost, DT_cost
 
     def _evaluate_Ramp(self, u_new, u_curr, p_new, p_curr, v_new, w_new):
         RampUp_violation = p_new - p_curr > self.RU * u_curr + self.SU * v_new
         RampDown_violation = p_curr - p_new > self.RD * u_new + self.SD * w_new
-        return RampUp_violation, RampDown_violation
+        RampUp_cost = np.sum(np.maximum(p_new - p_curr - (self.RU * u_curr + self.SU * v_new), 0))
+        RampDown_cost = np.sum(np.maximum(p_curr - p_new - (self.RD * u_new + self.SD * w_new), 0))
+        return RampUp_violation, RampDown_violation, RampUp_cost, RampDown_cost
 
     def _repair_action(self, on_off: np.ndarray, power: np.ndarray, angle: np.ndarray):
         """
@@ -341,7 +356,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         repaired_pi_new = np.minimum(np.maximum(pi_new, self.Pi_min), self.Pi_max)
         # the decision, on, implies turn-on and violates DT, so must keep it off
         # the decision, off, implies turn-off and violates UT, so must keep it on
-        UT_violation, DT_violation = self._evaluate_UTDT(u_new, v_new, w_new)
+        UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
         repaired_u_new = np.where(DT_violation, 0, np.where(UT_violation, 1, u_new))
         repaired_v_new, repaired_w_new = self._reckless_move(repaired_u_new, u_curr)
 
@@ -430,15 +445,15 @@ class UnitCommitmentMasterEnv(gym.Env):
         p_curr = self.p
 
         # compute cost (raw action)
-        UT_violation, DT_violation = self._evaluate_UTDT(u_new, v_new, w_new)
-        RampUp_violation, RampDown_violation = self._evaluate_Ramp(u_new, u_curr, p_new, p_curr, v_new, w_new)
-        UTDT_cost = np.sum(UT_violation) + np.sum(DT_violation)  # cost of the raw action
-        RampUp_cost = np.sum(RampUp_violation) + np.sum(RampDown_violation)  # cost of the raw action
-        cost = UTDT_cost + RampUp_cost
+        UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
+        RampUp_violation, RampDown_violation, RampUp_cost, RampDown_cost = self._evaluate_Ramp(u_new, u_curr, p_new, p_curr, v_new, w_new)
+        # UTDT_cost = np.sum(UT_violation) + np.sum(DT_violation)  # cost of the raw action todo
+        # RampUp_cost = np.sum(RampUp_violation) + np.sum(RampDown_violation)  # cost of the raw action todo
+        cost = UT_cost + DT_cost + RampUp_cost + RampDown_cost
         return cost
 
     def _get_terminated(self):
-        if self.t >= self.horizon:
+        if self.t >= self.T:
             self.terminated = True
         else:
             self.terminated = False
@@ -463,6 +478,9 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         # compute the cost of raw action
         self.cost += self._compute_cost(on_off, power)
+        self.penalty = self.cost * self.penalty_factor
+
+        self.log1.update({"test_n_violation": self.cost})  # todo:
 
         # repair the action (may fail and lead to truncated)
         (repaired_u_new, repaired_v_new, repaired_w_new,
@@ -481,13 +499,13 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.u = repaired_u_new
         self.v, self.w = repaired_v_new, repaired_w_new
         self._roll_seq()  # u_seq, v_seq, w_seq
-        if self.t < self.horizon:
+        if self.t < self.T:
             self.D_forecast = self._forecast_demand()
         state = self._get_state()
 
         return (
             state,
-            self.reward,
+            self.reward - self.penalty,
             self.terminated,
             self.truncated,
             {}
@@ -500,10 +518,12 @@ class UnitCommitmentMasterEnv(gym.Env):
 
     @property
     def max_episode_steps(self) -> int:
-        return self.horizon
+        return self.T
 
     def render(self) -> Any:
-        return np.zeros((100, 100, 3), dtype=np.uint8)
+        print("state:", f"{self._get_state(mode='dict')}")
+        print("cost (no. violations):", f"{self.cost}")
+        print("Specification:", f"{self.log1}")
 
     def close(self) -> None:
         return None
@@ -525,21 +545,27 @@ class ForecastModel:
         self.reset()
 
     def reset(self):
-        if self.model_type == "nyiso":
-            # make it 25hr to avoid the error in the last step
-            forecast_example = np.array(get_random_25hr_forecast(self.nyiso_path)).astype(float)
-            factor = self.loc / np.mean(forecast_example)
-            forecast_example = forecast_example * factor + np.random.normal(0, self.scale, forecast_example.shape)
-            self.model = iter(forecast_example)
+        if self.model_type == "deterministic":
+            # todo
+            pass
+        # elif self.model_type == "nyiso":
+        #     # make it 25hr to avoid the error in the last step
+        #     forecast_example = np.array(get_random_25hr_forecast(self.nyiso_path)).astype(float)
+        #     factor = self.loc / np.mean(forecast_example)
+        #     forecast_example = forecast_example * factor + np.random.normal(0, self.scale, forecast_example.shape)
+        #     self.model = iter(forecast_example)
         elif self.model_type == "normal":
             # self.model = stats.norm(loc=self.loc, scale=self.scale)
             self.model = np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
 
     def forecast(self):
-        if self.model_type == 'normal':
+        if self.model_type == "deterministic":
+            # todo
+            pass
+        elif self.model_type == 'normal':
             return np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
-        elif self.model_type == 'nyiso':
-            return next(self.model)
+        # elif self.model_type == 'nyiso':
+        #     return next(self.model)
 
 
 # env = UnitCommitmentMasterEnv(env_id='UC-v0')
