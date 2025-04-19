@@ -38,12 +38,13 @@ class UnitCommitmentMasterEnv(gym.Env):
     C_RP: reserve penalty cost
     R: reserve requirement
 
-    D: demand of bus n at time t, here assume only 1 bus to relax network constraints
+    D: demand of bus n at time t
     u: on/off status of ith generator at time t
     v: start-up status of ith generator at time t
     w: shut-down status of ith generator at time t
     p: power output of ith generator at time t
     r: reserve of ith generator at time t
+    pi: angle of bus n at time t
     """
 
     def __init__(self, env_id: str,
@@ -51,12 +52,24 @@ class UnitCommitmentMasterEnv(gym.Env):
         super().__init__()
 
         self.env_id = env_id
-        # self.env = self
 
-        self.log1 = {"test_n_violation": 0}  #todo
-        self.verbose = False
+        self.env_spec_log = {'Number of Minimum Up-time Violation': 0,
+                             'Penalty of Minimum Up-time Violation': 0,
+                             'Number of Minimum Down-time Violation': 0,
+                             'Penalty of Minimum Down-time Violation': 0,
+                             'Number of Ramping Up Violation': 0,
+                             'Penalty of Ramping Up Violation': 0,
+                             'Number of Ramping Down Violation': 0,
+                             'Penalty of Ramping Down Violation': 0,
+                             'Number of Irreparable Violation': 0,
+                             'Penalty of Irreparable Violation': 0,
+                             }
 
-        self.penalty_factor = 100
+        self.penalty_factor_UT = 100
+        self.penalty_factor_DT = 100
+        self.penalty_factor_RampUp = 100
+        self.penalty_factor_RampDown = 100
+        self.penalty_factor_irreparable = 1000000
 
         self.T = 24
         self._max_episode_steps = self.T
@@ -74,6 +87,12 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.Pi_max = np.array([0])
             self.Pi_min = np.array([0])
             self.pi = self.pi0 = np.array([0])
+            self.loc = [300.0]
+            self.scale = [70.0]
+            self.deterministic_demand = np.array([[362.], [191.], [303.], [263.], [416.], [302.],
+                                                  [328.], [234.], [357.], [266.], [333.], [325.],
+                                                  [343.], [285.], [290.], [329.], [245.], [305.],
+                                                  [311.], [254.], [385.], [214.], [197.], [227.]])
         elif self.env_id == 'UC-v1':
             self.num_bus = 4
             self.gen_bus = {0: 0, 1: 1, 2: 2, 3: 3, 4: 3}
@@ -86,6 +105,21 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.Pi_max = np.array([0, 0.2, 0.2, 0.2])  # angle_1 = 0
             self.Pi_min = np.array([0, -0.2, -0.2, -0.2])  # angle_1 = 0
             self.pi = self.pi0 = np.array([0, 0, 0, 0])
+            self.loc = [253.1,  60.3,  60.3,  70.1]
+            self.scale = [22.6,  6.0,  6.0,  8.4]
+            self.deterministic_demand = np.array([[226.,  57.,  52.,  59.], [233.,  57.,  65.,  77.],
+                                                  [258.,  59.,  48.,  78.], [272.,  67.,  55.,  67.],
+                                                  [247.,  55.,  65.,  65.], [232.,  65.,  69.,  63.],
+                                                  [213.,  57.,  59.,  69.], [245.,  71.,  60.,  74.],
+                                                  [243.,  59.,  72.,  61.], [263.,  63.,  55.,  56.],
+                                                  [291.,  60.,  55.,  72.], [235.,  58.,  59.,  73.],
+                                                  [234.,  59.,  67.,  65.], [253.,  47.,  54.,  63.],
+                                                  [267.,  52.,  47.,  55.], [223.,  58.,  57.,  72.],
+                                                  [239.,  67.,  62.,  67.], [260.,  60.,  56.,  63.],
+                                                  [234.,  61.,  62.,  76.], [241.,  59.,  54.,  84.],
+                                                  [298.,  63.,  63.,  76.], [235.,  55.,  52.,  80.],
+                                                  [273.,  63.,  75.,  80.], [276.,  54.,  73.,  70.]])
+
         else:
             raise ValueError(f"Unknown env_id: {env_id}")
         self.buses = range(self.num_bus)
@@ -106,12 +140,9 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.truncated = False
         self.reward = 0
         self.cost = 0
-        self.penalty = 0
 
         # default forecast
-        self.model_type = 'normal'
-        self.loc = 500
-        self.scale = 10
+        self.model_type = 'deterministic'
         self.nyiso_path = "./or_gym/envs/power_system/" + 'data/'
 
         # default information
@@ -158,7 +189,8 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         # initialize belief model/data
         self.D_forecast = np.zeros(self.num_bus)
-        self.forecast_model = ForecastModel(self.model_type, self.loc, self.scale, self.num_bus, self.nyiso_path)
+        self.forecast_model = ForecastModel(self.model_type, self.loc, self.scale, self.num_bus,
+                                            self.deterministic_demand, self.nyiso_path)
 
         self.reset()
 
@@ -236,9 +268,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.truncated = False
         self.reward = 0
         self.cost = 0
-        self.penalty = 0
 
-        # Bus assumed to be 1 only, drop network constraints
         self.pi = self.pi0
         self.p_prev = np.array([self.p0_prev[i] for i in self.generators], dtype=float)
         self.p = np.array([self.p0[i] for i in self.generators], dtype=float)
@@ -310,15 +340,17 @@ class UnitCommitmentMasterEnv(gym.Env):
         sum_w = w_new + np.array([np.sum(self.w_seq[i][:-1]) for i in self.generators])
         UT_violation = sum_v > u_new
         DT_violation = sum_w > (1 - u_new)
-        UT_cost = np.sum(np.maximum(sum_v - u_new, 0))  # sum_v > u_new
-        DT_cost = np.sum(np.maximum(sum_w - (1 - u_new), 0))  # sum_w > (1 - u_new)
+        UT_cost = np.sum(np.maximum(sum_v - u_new, 0)) * self.penalty_factor_UT
+        DT_cost = np.sum(np.maximum(sum_w - (1 - u_new), 0)) * self.penalty_factor_DT
         return UT_violation, DT_violation, UT_cost, DT_cost
 
     def _evaluate_Ramp(self, u_new, u_curr, p_new, p_curr, v_new, w_new):
         RampUp_violation = p_new - p_curr > self.RU * u_curr + self.SU * v_new
         RampDown_violation = p_curr - p_new > self.RD * u_new + self.SD * w_new
-        RampUp_cost = np.sum(np.maximum(p_new - p_curr - (self.RU * u_curr + self.SU * v_new), 0))
-        RampDown_cost = np.sum(np.maximum(p_curr - p_new - (self.RD * u_new + self.SD * w_new), 0))
+        RampUp_cost = np.sum(np.maximum(
+            p_new - p_curr - (self.RU * u_curr + self.SU * v_new), 0)) * self.penalty_factor_RampUp
+        RampDown_cost = np.sum(np.maximum(
+            p_curr - p_new - (self.RD * u_new + self.SD * w_new), 0)) * self.penalty_factor_RampDown
         return RampUp_violation, RampDown_violation, RampUp_cost, RampDown_cost
 
     def _repair_action(self, on_off: np.ndarray, power: np.ndarray, angle: np.ndarray):
@@ -336,7 +368,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         the must_on and must off obtained from Minimum Up-Time and Minimum Down-Time won't contradict with each other
         but the must on and must off obtained from Ramping down and Minimum Down-Time may contradict with each other
         if not contradicted, the action can be repaired by fixing all the must on&off and applying tighter bounds
-        if contradicted, the action cannot be repaired and leads to truncated
+        if contradicted, the action cannot be repaired and leads to truncated or a very large cost
         """
         u_new = on_off
         u_curr = self.u
@@ -361,8 +393,16 @@ class UnitCommitmentMasterEnv(gym.Env):
         repaired_v_new, repaired_w_new = self._reckless_move(repaired_u_new, u_curr)
 
         if np.any(contradiction):
-            self.truncated = True
+            # self.truncated = True # DON'T TRUNCATE EVEN THOUGH WE CANNOT REPAIR THE ACTION
             repaired_p_new = u_new * np.minimum(np.maximum(p_new, self.P_min), self.P_max)
+            # ADD UP A VERY LARGE COST INSTEAD
+            irreparable_violation = contradiction
+            irreparable_cost = np.sum(contradiction) * self.penalty_factor_irreparable
+            self.cost += irreparable_cost
+
+            self.env_spec_log['Number of Irreparable Violation'] += np.sum(irreparable_violation)
+            self.env_spec_log['Penalty of Irreparable Violation'] += irreparable_cost
+
         else:
             # repair the rest of the action
             ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
@@ -446,10 +486,21 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         # compute cost (raw action)
         UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
-        RampUp_violation, RampDown_violation, RampUp_cost, RampDown_cost = self._evaluate_Ramp(u_new, u_curr, p_new, p_curr, v_new, w_new)
-        # UTDT_cost = np.sum(UT_violation) + np.sum(DT_violation)  # cost of the raw action todo
-        # RampUp_cost = np.sum(RampUp_violation) + np.sum(RampDown_violation)  # cost of the raw action todo
+        RampUp_violation, RampDown_violation, RampUp_cost, RampDown_cost = self._evaluate_Ramp(u_new, u_curr,
+                                                                                               p_new, p_curr,
+                                                                                               v_new, w_new)
         cost = UT_cost + DT_cost + RampUp_cost + RampDown_cost
+
+        # log the violation and cost
+        self.env_spec_log['Number of Minimum Up-time Violation'] += np.sum(UT_violation)
+        self.env_spec_log['Penalty of Minimum Up-time Violation'] += UT_cost
+        self.env_spec_log['Number of Minimum Down-time Violation'] += np.sum(DT_violation)
+        self.env_spec_log['Penalty of Minimum Down-time Violation'] += DT_cost
+        self.env_spec_log['Number of Ramping Up Violation'] += np.sum(RampUp_violation)
+        self.env_spec_log['Penalty of Ramping Up Violation'] += RampUp_cost
+        self.env_spec_log['Number of Ramping Down Violation'] += np.sum(RampDown_violation)
+        self.env_spec_log['Penalty of Ramping Down Violation'] += RampDown_cost
+
         return cost
 
     def _get_terminated(self):
@@ -478,11 +529,9 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         # compute the cost of raw action
         self.cost += self._compute_cost(on_off, power)
-        self.penalty = self.cost * self.penalty_factor
 
-        self.log1.update({"test_n_violation": self.cost})  # todo:
-
-        # repair the action (may fail and lead to truncated)
+        # repair the action (may fail to repair -> use the partially repaired action and add a large cost)
+        # Note the _repair_action function will also update the cost inside the function if irreparable
         (repaired_u_new, repaired_v_new, repaired_w_new,
          repaired_p_new, repaired_pi_new) = self._repair_action(on_off, power, angle)
 
@@ -505,16 +554,11 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         return (
             state,
-            self.reward - self.penalty,
+            self.reward - self.cost,  # reward (negative) "-" cost (positive)
             self.terminated,
             self.truncated,
             {}
         )
-
-    def logg(self, *args):
-        if self.verbose:
-            print(*args)
-        return
 
     @property
     def max_episode_steps(self) -> int:
@@ -522,8 +566,9 @@ class UnitCommitmentMasterEnv(gym.Env):
 
     def render(self) -> Any:
         print("state:", f"{self._get_state(mode='dict')}")
-        print("cost (no. violations):", f"{self.cost}")
-        print("Specification:", f"{self.log1}")
+        print("reward:", f"{self.reward}")
+        print("cost:", f"{self.cost}")
+        print("specification:", f"{self.env_spec_log}")
 
     def close(self) -> None:
         return None
@@ -535,19 +580,19 @@ class UnitCommitmentMasterEnv(gym.Env):
 
 
 class ForecastModel:
-    def __init__(self, model_type, loc, scale, size, nyiso_path='data/'):
+    def __init__(self, model_type, loc, scale, size, deterministic_demand, nyiso_path='data/'):
         self.model_type = model_type
         self.loc = loc
         self.scale = scale
         self.size = size
+        self.deterministic_demand = deterministic_demand
         self.nyiso_path = nyiso_path
         self.model = None
         self.reset()
 
     def reset(self):
         if self.model_type == "deterministic":
-            # todo
-            pass
+            self.model = self.deterministic_demand
         # elif self.model_type == "nyiso":
         #     # make it 25hr to avoid the error in the last step
         #     forecast_example = np.array(get_random_25hr_forecast(self.nyiso_path)).astype(float)
@@ -560,8 +605,9 @@ class ForecastModel:
 
     def forecast(self):
         if self.model_type == "deterministic":
-            # todo
-            pass
+            d = self.model[0]
+            self.model = np.roll(self.model, -1)
+            return d
         elif self.model_type == 'normal':
             return np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
         # elif self.model_type == 'nyiso':

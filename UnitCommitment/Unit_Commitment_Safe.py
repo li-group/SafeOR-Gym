@@ -8,11 +8,7 @@ from typing import Any, ClassVar, List, Tuple, Optional, Dict
 import torch
 import numpy as np
 
-import scipy.stats as stats
-from or_gym.envs.power_system.forecast import get_random_25hr_forecast
 from Unit_Commitment_Gym import UnitCommitmentMasterEnv
-
-import gymnasium as gym
 
 import omnisafe
 from omnisafe.typing import OmnisafeSpace, DEVICE_CPU
@@ -33,7 +29,6 @@ class UnitCommitmentMasterEnvSafe(CMDP):
         self._device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         # Instantiate the environment object
         self._env = UnitCommitmentMasterEnv(env_id=env_id, **kwargs.get('env_cfgs', {}))
-        self.env_spec_log = {"dew": 0}
         # Specify the action space for initialization by the algorithm layer
         self._action_space = self._env.action_space
         # Specify the observation space for initialization by the algorithm layer
@@ -51,15 +46,12 @@ class UnitCommitmentMasterEnvSafe(CMDP):
     def step(self, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
                                                     dict]:
         # Read the dynamic information after interacting with the environment
-        obs, reward_minus_penalty, terminated, truncated, info = self._env.step(
+        obs, neg_reward_minus_pos_cost, terminated, truncated, info = self._env.step(
             action.detach().cpu().numpy(),
         )
 
-        reward = reward_minus_penalty + self._env.penalty
         cost = self._env.cost
-
-        print(self.env_spec_log)
-        self.env_spec_log.update({"dew": 3})
+        reward = neg_reward_minus_pos_cost + cost
 
         # Convert dynamic information into torch tensor.
         obs, reward, cost, terminated, truncated = (
@@ -88,23 +80,27 @@ class UnitCommitmentMasterEnvSafe(CMDP):
     def spec_log(self, logger: Logger) -> None:
         # Omnisafe method called at the end of each epoch. Averaged values are logged
         for key, value in self.env_spec_log.items():
-            logger.store({key: value})
+            logger.store({key: float(value)})
             self.env_spec_log[key] = 0.0
 
+    @property
+    def env_spec_log(self):
+        return self._env.env_spec_log
 
-if __name__ == "__main__":
-    import omnisafe
-    ALGO = "CPO"
-    env_id = "UC-v1"
 
-    custom_cfgs = {
-        'train_cfgs': {
-            'total_steps': 48,
-        },
-        'algo_cfgs': {
-            'steps_per_epoch': 24,
-            'update_iters': 2,
-        },
-    }
-    agent = omnisafe.Agent(ALGO, env_id, custom_cfgs=custom_cfgs)
-    agent.learn()
+# if __name__ == "__main__":
+#     import omnisafe
+#     ALGO = "CPO"
+#     env_id = "UC-v1"
+#
+#     custom_cfgs = {
+#         'train_cfgs': {
+#             'total_steps': 48,
+#         },
+#         'algo_cfgs': {
+#             'steps_per_epoch': 24,
+#             'update_iters': 2,
+#         },
+#     }
+#     agent = omnisafe.Agent(ALGO, env_id, custom_cfgs=custom_cfgs)
+#     agent.learn()
