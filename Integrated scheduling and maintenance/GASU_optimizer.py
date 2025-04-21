@@ -184,20 +184,15 @@ class optimize_GASU:
             return model.PD[c, t] == sum(model.PD_bar[c, m, t] for m in model.M)
         self.model.production = pyo.Constraint(self.model.C, self.model.T_bar, rule=production_rule)
 
+        # Mode Production Constraint
+        def mode_production_rule(model, c, m, t):
+            return model.PD_bar[c, m, t] == model.R[c, m, t] * model.CAP[c, m]
+        self.model.mode_production = pyo.Constraint(self.model.C, self.model.M, self.model.T_bar, rule=mode_production_rule)
+
         # Ramp Rate Constraint
         def ramp_rate_rule(model, c, m, t):
-            return model.PD_bar[c, m, t] == model.R[c, m, t] * model.CAP[c, m]
-        self.model.ramp_rate = pyo.Constraint(self.model.C, self.model.M, self.model.T_bar, rule=ramp_rate_rule)
-
-        # def zero_ramp_rate_rule(model, c, m, t):
-
-        def ramp_rate_rule_2(model, c, m, t):
             return model.R[c, m, t] <= model.y[c, m, t]
-        self.model.ramp_rate_2 = pyo.Constraint(self.model.C, self.model.M, self.model.T_bar, rule=ramp_rate_rule_2)
-
-        def ramp_rate_rule_3(model, c, t):
-            return model.R[c, 'M', t] <= 0
-        self.model.ramp_rate_3 = pyo.Constraint(self.model.C, self.model.T_bar, rule=ramp_rate_rule_3)
+        self.model.ramp_rate = pyo.Constraint(self.model.C, self.model.M, self.model.T_bar, rule=ramp_rate_rule)
 
         # Energy Consumption Constraint
         def energy_consumption_rule(model, t):
@@ -370,25 +365,6 @@ class optimize_GASU:
         ax.legend()
         plt.tight_layout()
         plt.show()
-
-        # ### Plot 5: Ramp Rate Plot (only for 'W' mode, zero during 'M')
-        # fig, ax = plt.subplots(figsize=(10, 6))
-        # for c in self.model.C:
-        #     ramp_rate_values = []
-        #     for t in self.model.T_bar:
-        #         is_working = value(self.model.y[c, 'W', t])
-        #         ramp_rate = value(self.model.R[c, 'W', t]) if is_working == 1 else 0
-        #         ramp_rate_values.append(ramp_rate)
-
-        #     ax.plot(self.model.T_bar, ramp_rate_values, label=f'Compressor {c}')
-
-        # ax.set_xlabel('Time')
-        # ax.set_ylabel('Ramp Rate (active only in W mode)')
-        # ax.set_title('Ramp Rate Plot (W mode only)')
-        # ax.legend()
-        # ax.grid(True)
-        # plt.tight_layout()
-        # plt.show()
 
         ### Plot 5: Ramp Rate Plot (0 when not in 'W' mode)
         fig, ax = plt.subplots(figsize=(10, 6))
