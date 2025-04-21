@@ -246,7 +246,7 @@ class STNEnv(CMDP):
         return self.horizon  # or self.num_periods
 
 
-    def _solve_rtn_milp(self):
+    def _solve_stn_milp(self):
         """
         Solve the full RTN MILP model using the data available in RTNEnv.
         Returns a dictionary with optimal actions and the total profit.
