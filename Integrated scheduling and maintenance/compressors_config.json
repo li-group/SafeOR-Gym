@@ -1,0 +1,35 @@
+[
+    {
+        "comp_id": "C1",
+        "capacity": 500, 
+        "specific_energy": 450,
+        "mttf": 18,
+        "mttr": 2,
+        "mntr": 5,
+        "TLCM": 0,
+        "TSLM": 15,
+        "CDM": 1
+    },
+    {
+        "comp_id": "C2",
+        "capacity": 250,
+        "specific_energy": 510,
+        "mttf": 20,
+        "mttr": 1,
+        "mntr": 6,
+        "TLCM": 0,
+        "TSLM": 10,
+        "CDM": 1
+    },
+    {
+        "comp_id": "C3",
+        "capacity": 150,
+        "specific_energy": 400,
+        "mttf": 24,
+        "mttr": 1,
+        "mntr": 3,
+        "TLCM": 0,
+        "TSLM": 0,
+        "CDM": 0
+    }
+]
