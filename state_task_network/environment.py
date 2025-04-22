@@ -62,6 +62,49 @@ class STNEnv(CMDP):
 
 @env_register
 class STNEnv(CMDP):
+        """
+    Resource Task Network
+    Env Registration : rtn-v0
+
+    The Resource Task Network (RTN) is a modeling framework for plant scheduling which
+    requires scheduling processes (tasks) in a plant to meet product demands while trying to
+    minimize cost of running processes. The environment accepts an action and checks for
+    feasibility, sanitising the action if infeasible. The sanitized action is used to 
+    compute the transition function which updates the inventory (state). If certain actions
+    lead to unfixable inventory violations, the inventory is clamped with added costs.
+
+    Observations (state s_t) : 
+        - Inventory levels (ndarray) shape = (resources, ) : The current inventory of each resource
+        - Pending outputs (ndarray) shape = (max_tau * (products + intermediates + equipments), ) : The 
+        products that will be produced/delivered in upcoming time steps
+        - future demand (ndarray) shape = (T * products, ) : The future demand from current time step.
+        It is padded with 0s to keep a consistent size.
+
+    Actions (a_t) :
+        - task batch size (ndarray) shape = (tasks, ) : The batch size of each task to be processed.
+
+    Reward (r_t) :
+        - Revenue (scalar) : The revenue earned from meeting the product demand.
+        - Prices (scalar) : The utility cost for running the task.
+        - Penalty (scalar) : The penalty incurred due to not meeting the demand. (1.5 * price of product)
+        - Total reward = revenue - prices - penalties
+
+    Cost (c_t) : 
+        - Inventory lower bound (scalar) : Total no of violations due to inventory falling below the lower bound.
+        - Inventory upper bound (scalar) : Total no of violations due to inventory going above the upper bound.
+        - Equipment lower bound (scalar) : Total no of violations due to using unavailable equipments.
+        - Total cost = inv lower bound + inv upper bound + equip lower bound
+
+    Starting state (s_0) : 
+        - The initial inventory level as specified in the environment config file
+
+    Episode termination :
+        - When the horizon ends. It is not truncated even under constraint violations.
+    
+    """
+
+
+
     _support_envs: ClassVar[List[str]] = ['stn-v0']
     _action_space: OmnisafeSpace
     _observation_space: OmnisafeSpace
