@@ -1,168 +1,78 @@
+'''
+Sai Madhukiran Kompalli
 
-import gymnasium as gym
+Multi-Echelon Inventory Management Environment
+
+'''
+
 import numpy as np
+import gymnasium as gym
+from gymnasium.spaces.utils import flatten_space
+from utils import assign_env_config, flatten_and_track_mappings
+import torch
+import random
 
-def assign_env_config(self, kwargs):
-    print("Assigning configuration...")
-    for key, value in kwargs.items():
-        print(f"Trying to set {key} to {value}")
-        if hasattr(self, key):
-            print(f"Setting {key} to {value}")
-            setattr(self, key, value)
-        else:
-            print(f"{self} has no attribute, {key}")
-            raise AttributeError(f"{self} has no attribute, {key}")
+"""
+Multi-Echelon Inventory Management Environment
 
-
-def flatten_dict(dictionary, parent_key='', separator=';'):
-    """
-    Recursively flatten a nested dictionary or list into a dict of (string_key -> value).
-
-    Changes from the original:
-    - We also flatten lists, producing sub-keys like "parent;listKey;0", "parent;listKey;1", etc.
-    - Non-numeric or empty placeholders are handled in a consistent way.
-    """
-    items = []
-    for key, value in dictionary.items():
-        # Convert the current key to string for safe concatenation
-        str_key = str(key)
-        new_key = parent_key + separator + str_key if parent_key else str_key
-
-        if isinstance(value, dict):
-            # Recursively flatten any nested dictionaries
-            if value:
-                items.extend(flatten_dict(value, new_key, separator=separator).items())
-            else:
-                # If it's an empty dict, store it as 0 or skip it
-                items.append((new_key, 0.0))
-
-        elif isinstance(value, list):
-            # Flatten each item in the list
-            for i, elem in enumerate(value):
-                child_key = f"{new_key}{separator}{i}"
-                if isinstance(elem, dict):
-                    # If list element is another dict, recurse
-                    if elem:
-                        items.extend(flatten_dict(elem, child_key, separator=separator).items())
-                    else:
-                        items.append((child_key, 0.0))
-                elif isinstance(elem, list):
-                    # If list element is itself a list, wrap it in a dict for recursion
-                    # or flatten inline. Here we wrap in a dict to reuse flatten_dict logic:
-                    sub_list_dict = {i: elem}
-                    items.extend(flatten_dict(sub_list_dict, child_key, separator=separator).items())
-                else:
-                    # Base case: numeric or string or something else
-                    items.append((child_key, elem))
-        
-        else:
-            # Base case: numeric or string or other
-            items.append((new_key, value))
-
-    return dict(items)
-
-def flatten_and_track_mappings(dictionary, separator=';'):
-    """
-    1) Recursively flatten the input (dict + possibly nested lists)
-    2) Build a mapping from array index -> path
-    3) Convert any non-numeric to 0
-    4) Return (flattened_array, index_mapping)
-    """
-    # 1) Flatten
-    flattened_dict = flatten_dict(dictionary, separator=separator)
-
-    # 2) Build index->keypath mappings and numeric array
-    mappings = []
-    flattened_values = []
-    for index, (key, value) in enumerate(flattened_dict.items()):
-        path_components = key.split(separator)
-        mappings.append((index, path_components))
-
-        # 3) Convert non-numeric to 0.0
-        if isinstance(value, (int, float)):
-            flattened_values.append(value)
-        else:
-            flattened_values.append(0.0)
-
-    # 4) Convert to numpy array
-    flattened_array = np.array(flattened_values, dtype=np.float32)
-    return flattened_array, mappings
-
-
-
-def convert_dict_to_tuple_keys(data):
-    result = {}
-    for outer_key, value in data.items():
-        if isinstance(value, dict):
-            # If the value is a dictionary, iterate over its items
-            for inner_key, inner_value in value.items():
-                result[(outer_key, inner_key)] = inner_value
-        else:
-            # If the value is not a dictionary, store it with the outer_key as a tuple
-            result[(outer_key)] = value
-    return result
-
-
-def nested_set(dic, keys, value):
-    for key in keys[:-1]:
-        dic = dic.setdefault(key, {})
-    dic[keys[-1]] = value
-    return(dic)
-def reconstruct_dict(flattened_array, mappings, separator=';'):
-    reconstructed_dict = {}
-    for index, keys in mappings:
-        nested_set(reconstructed_dict, keys, flattened_array[index])
-    return reconstructed_dict
-def get_jsons(layout):
-    import json
-    with open(f"./configs/json/connections_{layout}.json" ,"r") as f:
-        connections_s = f.readline()
-    connections = json.loads(connections_s)
-
-    with open(f"./configs/json/action_sample_{layout}.json" ,"r") as f:
-        action_sample_s = f.readline()
-    action_sample = json.loads(action_sample_s)
-    return connections, action_sample
+This environment simulates a multi-echelon supply chain with markets, retailers,
+distributors, producers, and raw distributors. Agents choose reorder quantities
+across transportation routes each time step to satisfy demand and manage inventory
+and backlogs. Costs include holding, operating, pipeline, and backlog penalties,
+with revenues from wholesale and retail sales.
+"""
 
 
 class InvMgmtEnv(gym.Env):
     """
-    Inventory Management Environment for multi-echelon supply chain,
+    Inventory Management Environment for a multi-echelon supply chain.
+
+    Parameters
+    ----------
+    env_id : str, default='InvMgmt-v0'
+        Unique identifier for the environment variant.
+    **kwargs
+        Environment configuration overrides (e.g., T=100, demand_parameters={'mean':20,'std':5,'seed':42}).
+
+    Attributes
+    ----------
+    T : int
+        Planning horizon (number of time steps).
+    main_nodes : List[int]
+        Node indices for inventory-holding facilities.
+    reordering_routes : List[Tuple[int,int]]
+        Available transportation links for reordering.
+    retailer_routes : List[Tuple[int,int]]
+        Links from retailers to markets where final demand occurs.
+    env_spec_log : dict
+        Counters for action/observation bound violations and penalties.
+    observation_space : gym.Space
+        Flattened observation space.
+    action_space : gym.Space
+        Flattened action space.
+    state : dict
+        Current state with nested fields: on_hand_inventory, pipeline_inventory,
+        sales, backlog, demand_window, and time index t.
+
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, env_id: str = 'InvMgmt-v0', **kwargs):
         """
-         1) assign_env_config
-         2) set penalty parameters
-         3) define placeholder for spaces
-         4) reset
+        Initialize the environment by setting defaults, applying overrides,
+        building spaces, and resetting to the initial state.
+
+        Parameters
+        ----------
+        env_id : str
+            Identifier for the environment variant.
+        **kwargs
+            Keyword arguments to override default configuration attributes.
+
         """
         super().__init__()
-        # 1) Assign environment config
-        self.env_config(kwargs)
+        self.env_id = env_id
 
-        # 2) Penalty multipliers
-        self.eps = 1e-3    # small action threshold
-        self.D = 1e3       # cost factor if out-of-bounds
-        self.P = 1e3       # cost factor if out-of-bounds
-
-        # 3) Observation/action spaces are defined after we build the state in get_new_start_state
-        self.observation_space = None
-        self.action_space = None
-
-        # 4) Reset environment
-        self.reset()
-
-        # print("Reset observation shape:", self.observation_space.shape)
-        
-    def env_config(self, kwargs):
-        """
-        - Uses set defaults
-        - Overwrites from kwargs
-        - Raises AttributeError if attribute isn't recognized
-        """
-
-        # Main environment horizon, node counts, etc. (unchanged)
+        # Default configuration parameters
         self.T = 360
         self.num_markets = 1
         self.num_retailers = 1
@@ -174,38 +84,17 @@ class InvMgmtEnv(gym.Env):
             + self.num_distributors + self.num_producers
             + self.num_raw_distributors
         )
-
-        # Example inventory defaults
         self.initial_inv = {1: 100, 2: 120, 3: 80, 4: 300, 5: 250, 6: 220}
-        # Higher holding cost at the market/retailer vs. downstream to reflect
-        # more expensive storage near the end of the chain
         self.inventory_holding_cost = {
-            1: 0.04,  # market
-            2: 0.03,  # retailer
-            3: 0.02,
-            4: 0.015,
-            5: 0.018,
-            6: 0.017
+            1: 0.04, 2: 0.03, 3: 0.02, 4: 0.015, 5: 0.018, 6: 0.017
         }
-
-        # Try to ensure the final route (1->0) is quite profitable (like a retail price),
-        # while other routes are smaller markups.
         self.unit_price = {
-            (1,0): 15.0,  # final sale to market is quite valuable
-            (2,1): 2.5,
-            (3,1): 2.7,
-            (4,2): 2.0,
-            (5,2): 1.5,
-            (6,2): 1.6,
-            (4,3): 1.8,
-            (6,3): 1.8,
-            (7,4): 0.5,
-            (7,5): 0.4,
-            (8,5): 0.35,
-            (8,6): 0.4
+            (1,0): 15.0, (2,1): 2.5, (3,1): 2.7,
+            (4,2): 2.0, (5,2): 1.5, (6,2): 1.6,
+            (4,3): 1.8, (6,3): 1.8,
+            (7,4): 0.5, (7,5): 0.4,
+            (8,5): 0.35, (8,6): 0.4
         }
-
-        # Slightly larger pipeline holding cost to reflect more expensive upstream shipments
         self.material_holding_cost = {
             (2,1): 0.02, (3,1): 0.03,
             (4,2): 0.02, (5,2): 0.015, (6,2): 0.015,
@@ -213,59 +102,21 @@ class InvMgmtEnv(gym.Env):
             (7,4): 0.0,  (7,5): 0.01,
             (8,5): 0.008, (8,6): 0.01
         }
-
-        # Lead times remain the same if you like your structure:
-        # (unmodified)
-        # self.lead_times = {
-        #     (2,1):5, (3,1):3, (4,2):8, (5,2):9, (6,2):11,
-        #     (4,3):10, (6,3):12, (7,4):0, (7,5):1, (8,5):2, (8,6):0
-        # }
         self.lead_times = {
-            (2,1):1, (3,1):1, (4,2):1, (5,2):1, (6,2):1,
-            (4,3):1, (6,3):1, (7,4):1, (7,5):1, (8,5):1, (8,6):1
+            (2,1): 1, (3,1): 1, (4,2): 1, (5,2): 1, (6,2): 1,
+            (4,3): 1, (6,3): 1, (7,4): 1, (7,5): 1, (8,5): 1, (8,6): 1
         }
-
-        # Higher operating cost so that producing is not too cheap
-        self.operating_cost = {
-            4: 2.0,
-            5: 2.5,
-            6: 3.0
-        }
-
-        # Production yield remains 1 if each unit of raw is 1 unit final
+        self.operating_cost = {4: 2.0, 5: 2.5, 6: 3.0}
         self.production_yield = {4: 1, 5: 1, 6: 1}
-
-        # If letting backlog occur, we penalize heavily (avoid ignoring demand)
-        self.unfulfilled_utility_penalty = {
-            (1,0): 1e5
-        }
-
-        # Demand parameters: higher mean so there's a reason to produce
-        self.demand_parameters = {
-            'mean': 30,
-            'std': 2,
-            'p': 0.7,
-            # We'll rely on environment seeding for the random seed
-        }
-
-        # Inventory capacities
+        self.unfulfilled_utility_penalty = {(1,0): 1e5}
+        self.demand_parameters = {'mean': 30, 'std': 2, 'p': 0.7, 'seed': 42}
         self.inv_capacity = {1: 300, 2: 300, 3: 300, 4: 500, 5: 500, 6: 400}
-
-        # Reordering capacities for routes
-        # self.reordering_route_capacity = {
-        #     (2,1): 30, (3,1): 45, (4,2): 80, (5,2): 55, (6,2): 40,
-        #     (4,3): 60, (6,3): 35, (7,4): 100, (7,5): 80, (8,5): 80, (8,6): 100
-        # }
         self.reordering_route_capacity = {
             (2,1): 100, (3,1): 100, (4,2): 100, (5,2): 100, (6,2): 100,
             (4,3): 100, (6,3): 100, (7,4): 100, (7,5): 100, (8,5): 100, (8,6): 100
         }
-
-        # j_in, j_out remain as is
-        self.j_in = {1:[2,3], 2:[4,5,6], 3:[4,6], 4:[7], 5:[7,8], 6:[8]}
-        self.j_out = {1:[0], 2:[1], 3:[1], 4:[2,3], 5:[2], 6:[2,3], 7:[4,5], 8:[5,6]}
-
-        # Build route lists
+        self.j_in = {1: [2,3], 2: [4,5,6], 3: [4,6], 4: [7], 5: [7,8], 6: [8]}
+        self.j_out = {1: [0], 2: [1], 3: [1], 4: [2,3], 5: [2], 6: [2,3], 7: [4,5], 8: [5,6]}
         self.main_nodes = list(range(
             self.num_markets,
             self.num_markets + self.num_retailers
@@ -277,265 +128,308 @@ class InvMgmtEnv(gym.Env):
             if rt[0] in range(self.num_markets, self.num_markets + self.num_retailers)
         ]
 
-    def get_new_start_state(self):
-        """
-        - Setup arrays
-        - Generate demand
-        - Build self.state dict
-        - Then define obs & action space shape
-        """
-        # Initialize environment arrays for horizon T
-        self.I = np.zeros((self.T+1, len(self.main_nodes)))  # on-hand
-        self.Tt = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}  # pipeline
-        self.R = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}   # reorder
-        self.Rp = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}  # arrived
-        self.Ss = {rt: np.zeros(self.T+1) for rt in self.retailer_routes}    # sales
-        self.Bb = {rt: np.zeros(self.T+2) for rt in self.retailer_routes}    # backlog
-        self.Dd = {rt: np.zeros(self.T+1) for rt in self.retailer_routes}    # demand
+        # Apply external overrides
+        assign_env_config(self, kwargs)
 
-        # Generate random demand with self.np_random
-        self.demand = {}
-        for rt in self.retailer_routes:
-            self.demand[rt] = self.np_random.normal(
-                loc=self.demand_parameters['mean'],
-                scale=self.demand_parameters['std'],
-                size=self.T
-            )
+        # Small threshold and penalty factors
+        self.eps = 1e-3
+        self.D = 1e3
+        self.P = 1e3
 
-        # Initialize on-hand inventory
-        for idx, node in enumerate(self.main_nodes):
-            self.I[0, idx] = self.initial_inv.get(node, 0.0)
-
-        # Build dictionary-based state for time t=0
-        self.state = {
-            "on_hand_inventory": {},
-            "pipeline_inventory": {},
-            "sales": {},
-            "backlog": {},
-            "demand_window": {},
-            "t": self.t
+        # Tracking of bound violations
+        self.env_spec_log = {
+            'Number of Action Bound Violations': 0,
+            'Penalty of Action Bound Violations': 0,
+            'Number of Observation Bound Violations': 0,
+            'Penalty of Observation Bound Violations': 0
         }
-        for idx, node in enumerate(self.main_nodes):
-            self.state["on_hand_inventory"][node] = float(self.I[self.t, idx])
-        for rt in self.reordering_routes:
-            self.state["pipeline_inventory"][rt] = [0.0]*self.lead_times[rt]
-        for rt in self.retailer_routes:
-            self.state["sales"][rt] = 0.0
-            self.state["backlog"][rt] = 0.0
 
-        # Define obs and action spaces after we see the final shape
+        # Define observation and action spaces
         obs_size = (
             len(self.main_nodes)
             + sum(self.lead_times[rt] for rt in self.reordering_routes)
-            + len(self.retailer_routes)  # sales
-            + len(self.retailer_routes)  # backlog
-            + len(self.retailer_routes)  # demand
-            + 1 # For time period
+            + 3 * len(self.retailer_routes)  # sales, backlog, demand
+            + 1  # time index
         )
-        obs_low = np.zeros(obs_size, dtype=np.float32)
-        obs_high = np.full(obs_size, np.inf, dtype=np.float32)
-        # limit on-hand by inv_capacity
+        low_obs = np.zeros(obs_size, dtype=np.float32)
+        high_obs = np.full(obs_size, np.inf, dtype=np.float32)
         for idx, node in enumerate(self.main_nodes):
-            obs_high[idx] = self.inv_capacity.get(node, np.inf)
+            high_obs[idx] = self.inv_capacity.get(node, np.inf)
+        self.raw_observation_space = gym.spaces.Box(low_obs, high_obs, dtype=np.float32)
+        self.observation_space = flatten_space(self.raw_observation_space)
 
-        self.observation_space = gym.spaces.Box(obs_low, obs_high, dtype=np.float32)
+        # act_low = np.zeros(len(self.reordering_routes), dtype=np.float32)
+        # act_high = np.array([
+        #     self.reordering_route_capacity[rt] for rt in self.reordering_routes
+        # ], dtype=np.float32)
+        # self.raw_action_space = gym.spaces.Box(act_low, act_high, dtype=np.float32)
+        # self.action_space = flatten_space(self.raw_action_space)
 
-        act_low = []
-        act_high = []
-        for rt in self.reordering_routes:
-            act_low.append(0.0)
-            cap = self.reordering_route_capacity[rt]
-            act_high.append(cap if cap is not None else np.inf)
-        self.action_space = gym.spaces.Box(
-            low=np.array(act_low, dtype=np.float32),
-            high=np.array(act_high, dtype=np.float32),
+        # actions in [-1,1]
+        self.raw_action_space = gym.spaces.Box(
+            low=-1.0, high=1.0,
+            shape=(len(self.reordering_routes),),
             dtype=np.float32
         )
+        self.action_space = flatten_space(self.raw_action_space)
 
-        # print("act_low", act_low)
-        # print("act_high", act_high)
+        # Initialize state
+        self.reset()
+
+    def _get_state(self, mode='arr'):
+        """
+        Return the current state either as a dict or a flattened array.
+
+        Parameters
+        ----------
+        mode : {'arr', 'dict'}
+            If 'dict', returns nested state dict; otherwise returns flattened numpy array.
+
+        Returns
+        -------
+        np.ndarray or dict
+        """
+        if mode == 'dict':
+            return self.state
+        flat_obs, mapping = flatten_and_track_mappings(self.state)
+        self.mapping_obs = mapping
+        return flat_obs
 
     def reset(self, seed=None, options=None):
         """
-         - set t=0, cost=0, reward=0, terminated=False
-         - call get_new_start_state
-         - flatten
-         - return flat obs, info
-        """
+        Reset the environment to initial conditions.
 
-         # Let Gym handle seeding => sets self.np_random
-        super().reset(seed=seed)
-        
+        Parameters
+        ----------
+        seed : int or None
+            Random seed for reproducibility.
+        options : dict, optional
+            Additional options (ignored).
+
+        Returns
+        -------
+        obs : np.ndarray
+            Flattened initial observation.
+        info : dict
+            Contains 'dict_state' (nested state) and 'terminated' flag.
+        """
+        if seed is not None:
+            self.set_seed(seed)
         self.t = 0
         self.reward = 0.0
         self.cost = 0.0
         self.terminated = False
 
-        self.get_new_start_state()
+        self._initialize_state_arrays()
+        self._build_initial_state_dict()
 
-        flat_obs, self.mapping_obs = flatten_and_track_mappings(self.state)
-        self.flatt_state = flat_obs
+        obs = self._get_state()
+        return obs, {'dict_state': self.state, 'terminated': self.terminated}
 
-        return self.flatt_state, {"dict_state": self.state, "terminated": self.terminated}
+    def _initialize_state_arrays(self):
+        """
+        Set up time-series arrays for inventory levels, orders, shipments, and demand.
+        """
+        self.I = np.zeros((self.T+1, len(self.main_nodes)))
+        self.Tt = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}
+        self.R = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}
+        self.Rp = {rt: np.zeros(self.T+1) for rt in self.reordering_routes}
+        self.Ss = {rt: np.zeros(self.T+1) for rt in self.retailer_routes}
+        self.Bb = {rt: np.zeros(self.T+2) for rt in self.retailer_routes}
+        self.Dd = {rt: np.zeros(self.T+1) for rt in self.retailer_routes}
+        # Use demand_parameters['seed'] for deterministic demand
+        seed = self.demand_parameters.get('seed', None)
+        if seed is not None:
+            rng = np.random.RandomState(seed)
+        else:
+            rng = self.np_random
+        self.demand = {
+            rt: rng.normal(
+                loc=self.demand_parameters['mean'],
+                scale=self.demand_parameters['std'],
+                size=self.T
+            ) for rt in self.retailer_routes
+        }
+        for idx, node in enumerate(self.main_nodes):
+            self.I[0, idx] = self.initial_inv.get(node, 0.0)
+
+    def _build_initial_state_dict(self):
+        """
+        Construct the nested state dictionary for time t=0.
+        """
+        self.state = {
+            'on_hand_inventory': {},
+            'pipeline_inventory': {},
+            'sales': {},
+            'backlog': {},
+            'demand_window': {},
+            't': self.t
+        }
+        for idx, node in enumerate(self.main_nodes):
+            self.state['on_hand_inventory'][node] = float(self.I[self.t, idx])
+        for rt in self.reordering_routes:
+            self.state['pipeline_inventory'][rt] = [0.0] * self.lead_times[rt]
 
     def sanitize_action(self, action_dict):
         """
-        - set small values to zero
-        - can round if desired
-        """
+        Zero out orders below a small threshold.
 
-        for rt in action_dict:
-            if abs(action_dict[rt]) < self.eps:
+        Parameters
+        ----------
+        action_dict : dict
+            Proposed reorder quantities per route.
+
+        Returns
+        -------
+        dict
+            Sanitized action dictionary.
+        """
+        for rt, val in action_dict.items():
+            if abs(val) < self.eps:
                 action_dict[rt] = 0.0
         return action_dict
 
     def update_dem(self):
         """
-        - Realize new demand every step_size
+        Realize new demand for retailers at current time step.
         """
-        # Ensure we are within horizon
         if 1 <= self.t < self.T:
             for rt in self.retailer_routes:
-                # Simply copy the single demand value at time t
-                self.Dd[rt][self.t] = self.demand[rt][self.t]
-
+                self.Dd[rt][self.t] = self.demand[rt][self.t - 1]
 
     def check_action_bounds_cost(self, action_dict):
         """
-        Clip actions if out of [0, route_capacity], apply penalty.
+        Clip out-of-bound actions and accumulate penalties.
         """
-        # Action checks
         for rt in self.reordering_routes:
             val = action_dict[rt]
             if val < 0.0:
-                diff = abs(val)
+                diff = -val
                 self.cost += diff**2 + self.P
+                self.env_spec_log['Number of Action Bound Violations'] += 1
+                self.env_spec_log['Penalty of Action Bound Violations'] += diff**2 + self.P
                 action_dict[rt] = 0.0
             max_val = self.reordering_route_capacity[rt]
             if val > max_val:
                 diff = val - max_val
                 self.cost += diff**2 + self.P
+                self.env_spec_log['Number of Action Bound Violations'] += 1
+                self.env_spec_log['Penalty of Action Bound Violations'] += diff**2 + self.P
                 action_dict[rt] = max_val
-
         return action_dict
-    
+
     def check_obs_bounds_cost(self, next_obs):
         """
-        If next_obs is provided, clip out-of-bounds (below 0 or above obs_high)
-           and apply penalty.
-        """
-        # Observation checks
-        if next_obs is not None:
-            low_b = self.observation_space.low
-            high_b = self.observation_space.high
-            for i in range(len(next_obs)):
-                if next_obs[i] < low_b[i]:
-                    diff = abs(next_obs[i] - low_b[i])
-                    self.cost += diff**2 + self.P
-                    next_obs[i] = low_b[i]
-                elif next_obs[i] > high_b[i]:
-                    diff = next_obs[i] - high_b[i]
-                    self.cost += diff**2 + self.P
-                    next_obs[i] = high_b[i]
+        Clip out-of-bound observations and accumulate penalties.
 
+        Parameters
+        ----------
+        next_obs : np.ndarray
+            Flattened observation to be checked.
+
+        Returns
+        -------
+        np.ndarray
+            Clipped observation.
+        """
+        low_b = self.observation_space.low
+        high_b = self.observation_space.high
+        for i, x in enumerate(next_obs):
+            if x < low_b[i]:
+                diff = low_b[i] - x
+                self.cost += diff**2 + self.P
+                self.env_spec_log['Number of Observation Bound Violations'] += 1
+                self.env_spec_log['Penalty of Observation Bound Violations'] += diff**2 + self.P
+                next_obs[i] = low_b[i]
+            elif x > high_b[i]:
+                diff = x - high_b[i]
+                self.cost += diff**2 + self.P
+                self.env_spec_log['Number of Observation Bound Violations'] += 1
+                self.env_spec_log['Penalty of Observation Bound Violations'] += diff**2 + self.P
+                next_obs[i] = high_b[i]
         return next_obs
 
     def calculate_reward(self):
         """
-        The 'original' inventory environment reward function, separate from step.
-        Summarizes the cost components, sets self.cost, then does reward = -cost.
-        Returns final reward.
+        Compute the net cost (holding + operating + pipeline + backlog - sales) and
+        set self.total_cost accordingly.
         """
         t = self.t
-        # Summation of all cost/profit terms
-        inv_cost = 0.0
-        op_cost = 0.0
-        pipeline_cost = 0.0
-        backlog_penalty = 0.0
-        total_sales = 0.0
-
-        # 1) Inventory + operating
+        inv_cost = op_cost = pipeline_cost = backlog_penalty = total_sales = 0.0
         for idx, node in enumerate(self.main_nodes):
-            inv_level = self.I[t, idx]
-            inv_cost += inv_level * self.inventory_holding_cost.get(node, 0.0)
-            # Operating cost (production nodes)
+            inv_cost += self.I[t, idx] * self.inventory_holding_cost[node]
             if node in self.operating_cost:
-                outflow = sum(
-                    self.R[(node,k)][t] 
-                    for k in self.j_out.get(node, []) if (node,k) in self.R
-                )
-                # yield factor
+                outflow = sum(self.R[(node,k)][t] for k in self.j_out.get(node, []))
                 op_cost += (outflow / self.production_yield[node]) * self.operating_cost[node]
-
-        # 2) Pipeline + reorder-based revenue
         for rt in self.reordering_routes:
-            pipeline_val = self.Tt[rt][t]
-            pipeline_cost += pipeline_val * self.material_holding_cost[rt]
-            # partial "wholesale" sale:
-            reorder_amount = self.R[rt][t]
-            wholesale_price = self.unit_price.get(rt, 0.0)
-            total_sales += reorder_amount * wholesale_price
-
-        # 3) Retail sales + backlog penalty
+            pipeline_cost += self.Tt[rt][t] * self.material_holding_cost[rt]
+            total_sales += self.R[rt][t] * self.unit_price.get(rt, 0.0)
         for rt in self.retailer_routes:
-            b_now = self.Bb[rt][t + 1]
-            backlog_penalty += b_now * self.unfulfilled_utility_penalty.get(rt, 0.0)
-            # Also final sale
-            s_now = self.Ss[rt][t]
-            retail_price = self.unit_price.get(rt, 0.0)
-            total_sales += s_now * retail_price
-
-        # 4) net cost => cost = everything but sales is positive
+            backlog_penalty += self.Bb[rt][t+1] * self.unfulfilled_utility_penalty.get(rt, 0.0)
+            total_sales += self.Ss[rt][t] * self.unit_price.get(rt, 0.0)
         self.total_cost = (inv_cost + op_cost + pipeline_cost + backlog_penalty) - total_sales
+    
+    def set_seed(self, seed: int):
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+    @property
+    def max_episode_steps(self) -> int:
+        return self.T
 
     def step(self, raw_action):
         """
-        - Convert action
-        - sanitize_action
-        - check_bounds_cost (actions)
-        - perform environment updates
-        - update demand
-        - compute reward via self.calculate_reward
-        - flatten next state
-        - check_bounds_cost (observations)
-        - check if done
-        - return
-        """
+        Apply an action to the environment and advance one time step.
 
+        Parameters
+        ----------
+        raw_action : dict or np.ndarray
+            Reorder quantities per route.
+
+        Returns
+        -------
+        obs : np.ndarray
+            Next flattened observation.
+        reward : float
+            Negative of total cost for this step.
+        terminated : bool
+            True if end of horizon reached.
+        truncated : bool
+            Always False (no truncation logic).
+        info : dict
+            Contains 'dict_state' and 'terminated'.
+        """
         truncated = False
-        self.reward = 0.0
-        self.cost = 0.0
+        self.reward = self.cost = 0.0
         self.total_cost = 0.0
 
-        # print("raw_action",raw_action)
-        # 1) Convert action
-        if isinstance(raw_action, dict):
-            action_dict = raw_action
-        elif isinstance(raw_action, np.ndarray):
+        action = raw_action.numpy() if torch.is_tensor(raw_action) else raw_action
+
+        # If the agent gave us a flat array in [-1,1], scale it to [0,capacity].
+        # If they already gave us a dict of reorders, just use it directly.
+        if isinstance(action, np.ndarray):
             action_dict = {}
             for i, rt in enumerate(self.reordering_routes):
-                action_dict[rt] = raw_action[i]
+                cap = self.reordering_route_capacity[rt]
+                action_dict[rt] = (action[i] + 1.0) * 0.5 * cap
+        elif isinstance(action, dict):
+            action_dict = action
         else:
-            raise ValueError("Action must be dict or np.ndarray")
-
-        # 2) sanitize_action
-        action_dict = self.sanitize_action(action_dict)
-
-        # 3) check_bounds_cost for actions
-        action_dict= self.check_action_bounds_cost(action_dict)
-
-        # print("action_dict",action_dict)
+            raise ValueError("Action must be np.ndarray or dict")
         
-        # 4) environment dynamics
+        action_dict = self.sanitize_action(action_dict)
+        action_dict = self.check_action_bounds_cost(action_dict)
+
+
+        # Advance time and update flows
         self.t += 1
         t = self.t
-
-        # Post reorder
         for rt in self.reordering_routes:
-            self.R[rt][t] = action_dict[rt]
-            if t - self.lead_times[rt] >= 1:
-                arrive_t = t - self.lead_times[rt]
-                self.Rp[rt][t] = self.R[rt][arrive_t]
+            self.R[rt][self.t] = action_dict[rt]
+            arrive = self.t - self.lead_times[rt]
+            if arrive >= 1:
+                self.Rp[rt][self.t] = self.R[rt][arrive]
 
         # Production/distribution nodes
         for node in range(
@@ -572,6 +466,7 @@ class InvMgmtEnv(gym.Env):
 
         # Demand update
         self.update_dem()
+        print(self.Dd)
 
         # Retailer sales
         for node in range(self.num_markets, self.num_markets + self.num_retailers):
@@ -623,16 +518,12 @@ class InvMgmtEnv(gym.Env):
                 # If t is out of range, store 0.0
                 self.state["demand_window"][rt] = [0.0]
 
-
         # print("state",self.state, t)
         # Flatten
         flat_obs, _ = flatten_and_track_mappings(self.state)
 
         # print("flat_obs", flat_obs)
         self.flatt_state = flat_obs
-
-        # print("flat_obs", flat_obs)
-        # Debug: Print the shape and compare it to observation_space.shape
 
         # 7) check_bounds_cost for observations
         clipped_obs = self.check_obs_bounds_cost(next_obs=self.flatt_state)
@@ -646,18 +537,20 @@ class InvMgmtEnv(gym.Env):
 
         info = {"dict_state": self.state, "terminated": self.terminated}
         return self.flatt_state, self.reward, self.terminated, truncated, info
-
+    
     def render(self, mode='human'):
         """
-        Printing out Time step, Reward and costs
+        Display the current time step and performance metrics.
         """
-        print(f"Time step: {self.t}, Step Reward: {self.reward}, Step Cost: {self.cost}")
+        print(f"Time step: {self.t}, Reward: {self.reward}, Cost: {self.cost}")
 
     def close(self):
+        """
+        Clean up resources (none required).
+        """
         pass
 
-
-# Manual Run
+# # Manual Run
 # env = InvMgmtEnv()
 # obs, info = env.reset()
 # print("Manual rollout start...")
