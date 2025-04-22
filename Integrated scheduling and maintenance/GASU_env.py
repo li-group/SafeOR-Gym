@@ -33,6 +33,7 @@ from PIL import Image, ImageDraw, ImageFont
 import random
 from scipy.spatial import ConvexHull
 import json
+import math
 
 """
 at the start of day (1-31): 
@@ -373,16 +374,19 @@ class GASU(gym.Env):
         penalty = 0
         comp_ids = list(self.compressors.keys())
         tlcm = self.state["TLCM"]
+        tslm = self.state["TSLM"]
         maint_action = action["maintenance_action"]
 
         for i, cid in enumerate(comp_ids):
             # Case 1: Interrupting maintenance before it's done
             if maint_action[i] != 1 and tlcm[i] > 0:
-                penalty += self.Penalty_maint_duration * tlcm[i]
+                penalty += self.Penalty_maint_duration * math.exp(tlcm[i])
 
             # Case 2: Negative TLCM (overrun) — theoretically shouldn't happen if logic is right, but safe to guard.
-            elif tlcm[i] < 0:
-                penalty += -self.Penalty_maint_duration * tlcm[i]
+            elif maint_action[i] == 1 and tlcm[i] == 0 and (tslm[i] == 0):
+                penalty += self.Penalty_maint_duration * math.exp(tlcm[i])            
+            elif tlcm[i] < 0 and maint_action[i] == 1:
+                penalty += -self.Penalty_maint_duration * math.exp(tlcm[i])
         return penalty
 
     def maintenance_failure_time_penalty(self, action):
@@ -392,7 +396,9 @@ class GASU(gym.Env):
 
         for i, cid in enumerate(comp_ids):
             comp = self.compressors[cid]
-            if tslm[i] > comp.mttf:
+            if tslm[i] == comp.mttf and action["maintenance_action"][i] == 0:
+                penalty += self.Penalty_maint_failure_time 
+            elif tslm[i] > comp.mttf and action["maintenance_action"][i] == 0:
                 penalty += self.Penalty_maint_failure_time * (tslm[i] - comp.mttf)
         return penalty
 
@@ -400,12 +406,13 @@ class GASU(gym.Env):
         penalty = 0
         comp_ids = list(self.compressors.keys())
         tslm = self.state["TSLM"]
+        tlcm = self.state["TLCM"]
         cdm = self.state["CDM"]
         maintenance_actions = action["maintenance_action"]
 
         for i, cid in enumerate(comp_ids):
             comp = self.compressors[cid]
-            if maintenance_actions[i] == 1 and cdm[i] == 0:
+            if maintenance_actions[i] == 1 and cdm[i] == 0 and tlcm[i] == 0:
                 penalty += self.Penalty_early_maint * tslm[i]
         return penalty
 
