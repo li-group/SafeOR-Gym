@@ -28,7 +28,7 @@ class UnitCommitmentMasterEnvSafe(CMDP):
         super().__init__(env_id)
         self._device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         # Instantiate the environment object
-        self._env = UnitCommitmentMasterEnv(env_id=env_id, **kwargs.get('env_cfgs', {}))
+        self._env = UnitCommitmentMasterEnv(env_id=env_id, **kwargs.get('env_init_config', {}))
         # Specify the action space for initialization by the algorithm layer
         self._action_space = self._env.action_space
         # Specify the observation space for initialization by the algorithm layer
@@ -101,6 +101,13 @@ class UnitCommitmentMasterEnvSafe(CMDP):
 #             'steps_per_epoch': 24,
 #             'update_iters': 2,
 #         },
+#         'env_cfgs': {
+#             'env_init_config': {
+#                 'T': 24,
+#                 'penalty_factor_UT': 99,
+#                 'penalty_factor_DT': 101,
+#             }
+#         }
 #     }
 #     agent = omnisafe.Agent(ALGO, env_id, custom_cfgs=custom_cfgs)
 #     agent.learn()

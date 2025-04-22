@@ -18,7 +18,51 @@ from gymnasium.spaces.utils import flatten_space
 
 class UnitCommitmentMasterEnv(gym.Env):
     """
-    Problem Description:...
+    Unit Commitment Environment
+    UC-v0: single-bus system without network constraints
+    UC-v1: multiple-buses system with network constraints
+
+    The Unit Commitment Problem is a combinatorial optimization problem in which the objective is to
+    determine the optimal schedule for turning power units on or off, generating and dispatching power over a given time horizon.
+    The goal is to minimize production costs while meeting demand and satisfying various operational constraints such as
+    generation limits, ramping rates, and minimum uptime/downtime of units, reserve requirements, and network constraints.
+    This version is typically solved in an online fashion, where decisions are made in real-time based on
+    the current state of the system and the forecast of demand for the next time period.
+
+    Observation:
+        'u_seq': dictionary of binary vectors indicating the on/off status of ith generator from t-max(UT, DT)-1 to t
+        'D_forecast': forecasted demand of bus n at time t+1
+        'p': power output of ith generator at time t
+
+    Actions:
+        'on_off': binary vector indicating the on/off status of ith generator at time t+1
+        'power': power output of ith generator at time t+1
+        'angle': angle of bus n at time t+1 (only for UC-v1)
+
+    Reward:
+        The reward is the negative of the following costs:
+        - production cost: the cost of generating power from the generators
+        - start-up cost: the cost of starting up a generator from off to on
+        - shut-down cost: the cost of shutting down a generator from on to off
+        - load shedding cost: the cost of not meeting or exceeding the demand
+        - reserve cost: the cost of not meeting the reserve requirement
+
+    Cost:
+        The cost is the positive of the following costs related to safety:
+        - minimum up-time/down-time cost: the cost of violating the minimum up-time/down-time constraint
+        - ramping up/down cost: the cost of violating the ramping up/down constraint
+        - irreparable cost: the cost of violating ramping down and minimum down-time and being irreparable
+
+    Starting State:
+        if no_change_before_0 = True,
+        then the on-off status of the generators does not change before time 0
+        if no_change_before_0 = False,
+        then the on-off status of the generators from -max(UT, DT)-1 to 0 is initialized with given u0_seq
+
+    Episode Termination:
+        The episode terminates when the time step reaches T (24 hours).
+        Invalid action is repaired inside the environment and does not terminate the episode, instead a cost is applied
+
     P_max: maximum power output of ith generator
     P_min: minimum power output of ith generator
     UT: minimum up time of ith generator
