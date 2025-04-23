@@ -32,7 +32,6 @@ class InvMgmtEnv(gym.Env):
          • carries forward any unfulfilled demand as backlog, and  
          • computes the net profit (revenues minus costs and penalties)  
        which is returned as the step reward.
-       [ add citation here ]
 
     Observation Space
        The flattened observation vector contains, in this order:
