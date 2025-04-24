@@ -200,14 +200,19 @@ class GASU(gym.Env):
         self._initialize_action_space()
         self._initialize_state()
 
-        self.Penalty_maint_duration = 1 * 1e4
-        self.Penalty_maint_failure_time = 1 * 1e4
+        self.Penalty_maint_duration = 1 * 1e2
+        self.Penalty_maint_failure_time = 1 * 1e5
         self.Penalty_early_maint = 1 * 1e5
         self.Penalty_ramp = 1 * 1e5
         self.Penalty_demand = 1 * 1e5
         
         self.done = False
         self.info = {}  
+        self.env_spec_log = {'Total penalty: Generator lower bound violations':0,'Number of Generator lower bound violations':0,
+                        'Total penalty: Generator upper bound violations':0,'Number of Generator upper bound violations':0,
+                        'Number of Transmission power bound violations':0, 'Number of Demand violations': 0,'Total penalty: Demand violations': 0,
+                        'Number of negative power violations': 0,'Total penalty: negative power violations': 0
+                        }
 
     def _initialize_simulation_data(self):
         demand_simulator = Demand_simulator(self.simulation_days, self.compressors)
@@ -216,63 +221,68 @@ class GASU(gym.Env):
 
         price_simulator = Electric_price_simulator(self.simulation_days)
         price_array = price_simulator.get_price_array()
-        self.price_array = price_array     
-
-    def reset(self):
+        self.price_array = price_array
+             
+    def reset(self, seed = 0, options = None):
         self.current_day = 0
         # self._initialize_simulation_data()
         self._initialize_state()
         self.done = False
+        self.terminated = False
         self.reward = 0
         self.info = {} 
+        self.flatt_state = self.encode_observation(self.state)
+        return self.flatt_state, {"dict_state": self.state, "terminated": self.terminated}
 
     def _initialize_observation_space(self):
-
         self.max_mttr = max(comp.mttr for comp in self.compressors.values())
         self.total_capacity = sum(comp.capacity for comp in self.compressors.values())
+        n = len(self.compressors)
+        S = self.state_horizon
+
         self.observation_space = Dict({
             "demand": Box(
-                low=0,
+                low=0.0,
                 high=self.total_capacity * 10,
-                shape=(self.state_horizon,),
+                shape=(S,),
                 dtype=np.float32
             ),
             "electricity_price": Box(
-                low=0,
-                high=10,
-                shape=(self.state_horizon,),
+                low=0.0,
+                high=10.0,
+                shape=(S,),
                 dtype=np.float32
             ),
-            "TLCM": Box(         # Time Left to Complete Maintenance, if started (days)
-                low=0,
-                high= self.max_mttr,
-                shape= (len(self.compressors),),
-                dtype= np.float32
-            ), 
-            "TSLM": Box(        # Time Since Last Maintenance (days)
-                low=0,
-                high=100,
-                shape=(len(self.compressors),),
+            "TLCM": Box(  # Time Left to Complete Maintenance (days)
+                low=0.0,
+                high=self.max_mttr,
+                shape=(n,),
                 dtype=np.float32
-            ),                                                  
-            "CDM": MultiBinary(len(self.compressors)),          # Can Do Maintenance (derived from 'TSLM and mntr')                                             
+            ),
+            "TSLM": Box(  # Time Since Last Maintenance (days)
+                low=0.0,
+                high=100.0,
+                shape=(n,),
+                dtype=np.float32
+            ),
+            "CDM": MultiBinary(n)  # Can Do Maintenance: binary mask
         })
 
     def _initialize_action_space(self):
+        n = len(self.compressors)
         
-        # Define the Action Space
-        self.action_space = Dict({
-            "maintenance_action": MultiDiscrete([2] * len(self.compressors)),     # 0 or 1 for each compressor: indicating maintenance or not
-            "production_rate": Box(low=0, high=1, shape=(len(self.compressors),), dtype=np.float32),
-            "external_purchase": Box(low=0, high=10000, shape=(1,), dtype=np.float32)
-        })
+        # Create lower and upper bounds
+        low = np.array([0] * n + [0.0] * n + [0.0], dtype=np.float32)          # maintenance (0), production (0), purchase (0)
+        high = np.array([1] * n + [1.0] * n + [10000.0], dtype=np.float32)     # maintenance (1), production (1), purchase (10000)
+
+        self.action_space = Box(low=low, high=high, dtype=np.float32)
 
         '''
-        _NOTE_: Maintenance and Ramp cannot be coupled, since ramp can be zero if demand is zero, 
-        however, that doesn't suggest that the compressor is under maintenance.  '''
-        # should I use (0-1) for external purchase or (0-10000) for external purchase?
-        # I think (0-10000) is better, as it is more interpretable
-    
+        REMARKS:
+        1. Maintenance and Ramp cannot be coupled, since ramp can be zero if demand is zero, however, that doesn't suggest that the compressor is under maintenance.  
+        2. Maybe also use maximum external purchase capacity, and use a coefficent in (0-1) in the action space.
+        '''
+   
     def update_information_state(self):
 
         start_idx = self.current_day     # Start of Day: "current_day + 1"
@@ -349,6 +359,7 @@ class GASU(gym.Env):
         self.update_compressor_physical_condition_state()
 
         # UPDATE STATE TO MATCH: Gym-compliant obs tensor for learning !!
+
         return self.state
 
     def production_and_external_purchase_cost(self, action):
@@ -450,30 +461,96 @@ class GASU(gym.Env):
         demand_today = self.demand_array[self.current_day]
 
         # Apply penalty if demand not met exactly
-        if demand_today != total_supplied:
+        if abs(demand_today - total_supplied) > 10:
             penalty = self.Penalty_demand * abs(demand_today - total_supplied)
         return penalty
       
+    def sanitize_action(self, action):
+
+        """
+        Sanitize the action: To resolve state bound constraints
+        """
+        comp_ids = list(self.compressors.keys())
+        n_comp = len(comp_ids)
+        maintenance_action = action["maintenance_action"]
+        production_rate = action["production_rate"]
+        external_purchase = action["external_purchase"][0]
+
+        for i, cid in enumerate(comp_ids):
+            comp = self.compressors[cid]
+
+            # Do maintenance if tslm >= mttf
+            if self.state["TSLM"][i] >= comp.mttf and maintenance_action[i] != 1:
+                maintenance_action[i] = 1
+                production_rate[i] = 0
+            
+            # Do not ramp if under maintenance
+            if maintenance_action[i] == 1 and production_rate[i] > 0:
+                production_rate[i] = 0
+            
+            # Do not maintain if cdm is 0
+            if self.state["CDM"][i] == 0 and maintenance_action[i] == 1:
+                maintenance_action[i] = 0
+
+            # Keep maintaining if tlcm > 0
+            if self.state["TLCM"][i] > 0 and maintenance_action[i] != 1:
+                maintenance_action[i] = 1
+                production_rate[i] = 0
+
+        # update action dict
+        action["maintenance_action"] = maintenance_action
+        action["production_rate"] = production_rate
+
+    def decode_action(self, action):
+        n = len(self.compressors)
+        maintenance_action = np.round(action[:n]).astype(int)
+        production_rate = action[n:2*n]
+        external_purchase = action[-1:]  # keeps it as shape (1,)
+
+        return {
+            "maintenance_action": maintenance_action,
+            "production_rate": production_rate,
+            "external_purchase": external_purchase
+        }
+    
+    def encode_observation(self, state):
+        """
+        Converts a structured observation dictionary into a flat NumPy array
+        compatible with the Box observation space.
+        """
+        demand = np.array(state["demand"], dtype=np.float32)                        # shape (S,)
+        electricity_price = np.array(state["electricity_price"], dtype=np.float32)  # shape (S,)
+        tlcm = np.array(state["TLCM"], dtype=np.float32)                            # shape (n,)
+        tslm = np.array(state["TSLM"], dtype=np.float32)                            # shape (n,)
+        cdm = np.array(state["CDM"], dtype=np.float32)                              # shape (n,), encoded as float
+        flatt_state = np.concatenate([demand, electricity_price, tlcm, tslm, cdm])
+        
+        return flatt_state
+
     def step(self, action):
         truncated = False
 
+        # make sure the action is within the valid range
+        action = np.clip(action, self.action_space.low, self.action_space.high)
+        action_dict = self.decode_action(action)
+        
         ## COST INCURRED AS PER THE PLANT CONFIGURATION and EXTERNAL PURCHASE
-        cost = self.production_and_external_purchase_cost(action)
+        cost = self.production_and_external_purchase_cost(action_dict)
 
         ## PENALTY 1: TO LEARN THE MAINTENANCE DURATION
-        penalty_LMD = self.maintenance_duration_penalty(action)
+        penalty_LMD = self.maintenance_duration_penalty(action_dict)
 
         ## PENALTY 2: TO LEARN THE MAINTENANCE MTTF 
-        penalty_MTTF = self.maintenance_failure_time_penalty(action)
+        penalty_MTTF = self.maintenance_failure_time_penalty(action_dict)
 
         ## PENALTY 3: TO LEARN that MAINTAINENCE is ONLY POSSIBLE TO DO AFTER TSLM > mntr
-        penalty_maint = self.early_maintenance_penalty(action)
+        penalty_maint = self.early_maintenance_penalty(action_dict)
 
         ## PENALTY 4: TO LEARN TO STOP RAMPING DURING MAINTENANCE
-        penalty_ramp = self.ramp_penalty(action)
+        penalty_ramp = self.ramp_penalty(action_dict)
 
         ## PENALTY 5: TO LEARN THE DEMAND SATISFACTION
-        penalty_demand = self.demand_penalty(action)
+        penalty_demand = self.demand_penalty(action_dict)
 
         self.info[self.current_day+1] = {}
         self.info[self.current_day+1]["cost"] = cost
@@ -483,6 +560,7 @@ class GASU(gym.Env):
         self.info[self.current_day+1]["penalty_maint"] = int(penalty_maint > 0)
         self.info[self.current_day+1]["penalty_ramp"] = int(penalty_ramp > 0)
         self.info[self.current_day+1]["penalty_demand"] = int(penalty_demand > 0)
+        # USE self.logger for above.
 
         # TOTAL cost = cost + penalties
         total_cost = cost + penalty_LMD + penalty_MTTF + penalty_maint + penalty_ramp + penalty_demand
@@ -491,15 +569,21 @@ class GASU(gym.Env):
 
         self.current_day += self.action_horizon      # 1 day
         
+        self.sanitize_action(action_dict)            # To prevent state bound violations     
         self.update_information_state()
-        self.update_compressor_physical_condition_state(action)
+        self.update_compressor_physical_condition_state(action_dict)
 
         if self.current_day == self.T:       # one month (31 days)
             self.done = True                 # end of episode
-        return self.state, self.reward, self.done, truncated, self.info
+        
+        self.flatt_state = self.encode_observation(self.state)
 
-    def render(self):
-        return self.state
+        return self.flatt_state, self.reward, self.done, truncated, self.info
+
+    def render(self, mode='human'):
+        print("state:",f"{self.state}")
+        print("cost:",f"{self.cost_ep}")
+        print("Specification:",f"{self.env_spec_log}")
 
     def render_information_state(self):
         return self.state_demand, self.state_price
