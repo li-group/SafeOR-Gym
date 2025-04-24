@@ -1,27 +1,17 @@
 '''
-ASU Joint Prodcution and Maintenance Environment: Gasesous Demand (GAN and GOX): NO INVENTORY 
+ASU Joint Production and Maintenance Environment: Gasesous Demand (GAN and GOX): NO INVENTORY 
 Akshdeep Singh Ahluwalia 
-
-SAFE RL: TO ENSURE Gaseous Demand Satisfaction and SAFE Maintainence of the compressors, 
-Salient features:
-• To ensure gaseous demand satisfaction (either through production or external purchase (expensive))
-• Maintainence decision to happen only after certain days of operation 
-    (to make it available for production to happen, i.e., failure happens right the next day after the mean time to failure.)
-• To start maintaince on or before the MTTR (to stop production if mean time to failuer has passed and then start maintainence.)
-• To keep duration of maintenence (or the compressor not be used) for at least for MTTR days
-
-Production_rate -> between 0 and 1
-Maintaining the compressor -> 0 or 1
-Production_rate <= Capacity * (1 - maintenance_decision) 
-
-Simulation Horizon:  
-31 days (1-31)
 '''
 
+import random
+from typing import Any, ClassVar, List, Tuple, Optional, Dict
+import torch
 import numpy as np
+import scipy.stats as stats
+# from or_gym.utils import assign_env_config
 import gymnasium as gym
-from gymnasium import spaces    # https://gymnasium.farama.org/
-
+from gymnasium.spaces.utils import flatten_space
+from gymnasium import spaces        # https://gymnasium.farama.org/
 from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete, MultiBinary
 from gymnasium.utils import seeding
 import json
@@ -30,20 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os, sys
 from PIL import Image, ImageDraw, ImageFont
-import random
-from scipy.spatial import ConvexHull
-import json
 import math
-
-"""
-at the start of day (1-31): 
-    - 30 days of demand data
-    - 30 days of price data
-
-at the start of 31st day: we have data of 31st day itself and 29 coming days (total 30 days, making simulation days = 60)
-
-i.e., episode length = 31 days (1-31)
-"""
 
 # --- Compressor Class ---
 class Compressor:
@@ -138,7 +115,7 @@ class Electric_price_simulator:
         np.random.seed(self.seed)
 
     def get_price_array(self):
-        base_price = 0.0832  # average industrial price in the US in $/kWh
+        base_price = 0.0832           # average industrial price in the US in $/kWh
         days = np.arange(self.duration)
 
         # Weekly cycle: higher prices Mon-Fri, lower Sat-Sun
@@ -162,38 +139,92 @@ class Electric_price_simulator:
 # --- Plant Class ---
 class GASU(gym.Env):
 
-    def __init__(self, T, state_horizon, action_horizon):
-        
-        ## ALSO PUT IN ACTION HORIZON, i.e., 1 day (here)
-        ## however, make it user defined, how long the action has to be predicted and also to be re-optimized. 
-        # here action horizon = 1 day
-        # Action_horizon would also be needed to pass to the optimizer to fetch optimal action of appropriate length (action_horizon)
-        self.action_horizon = action_horizon
+    """
+        GASUEnv simulates the operation and maintenance of compressors in an air
+        separation unit (ASU) focused on meeting gaseous product demand. Since in-
+        ventorying gaseous products is impractical, the system allows for external prod-
+        uct purchases when demand exceeds production capacity. The ASU consists of
+        a set C of n compressors (n = 3), where each compressor c ∈ C has a maximum
+        capacity denoted by Capc. The agent must decide on a daily basis whether
+        each compressor should operate at a production level rc ∈ [0, 1] of its maximum
+        capacity or undergo maintenance, based on its condition. Over an episode of
+        length T , the agent also determines daily external purchase quantities, aiming
+        to minimize the total operational cost, which includes both production and pur-
+        chase costs.
 
-        ## UPDATE STATE IN THE STEP FUNCTION WOULD DIRECTLY DEPEND ON HOW LONG THE ACTION HORIZON IS 
+        Industrial Scheduling and Maintenance Environment: Gasesous Demand (GAN and GOX): NO INVENTORY
+        
+        Observation:
+            Type: Dict(5)
+            Num     Observation
+            0       Demand
+            1       Electricity price 
+            2       Time Left to Complete Maintenance 
+            3       Time Since Last Maintenance 
+            4       Can Do Maintenance 
+
+        Action:
+            Type: Box(3)
+            Num     Action
+            0       Maintenance action (0 or 1)
+            1       Production rate (0 to 1)
+            2       External purchase (0 to 10000)
+
+        Reward:
+            Type: float
+            Cost = Production cost + External purchase cost
+            Production cost = Production rate * Capacity * Specific energy * Electricity price
+            External purchase cost = External purchase Quantity * External purchase price
+
+        Cost:
+            Type: float
+            - Cost for maintenance duration: For agent to learn the maintenance duration
+            - Cost for maintenance failure time: For agent to learn the maintenance MTTF
+            - Cost for early maintenance: For agent to learn that maintenance is only possible to do after TSLM > mntr
+            - Cost for ramping during maintenance: For agent to learn to stop ramping during maintenance
+            - Cost for demand satisfaction: For agent to learn the demand satisfaction
+        
+        Termination:
+            The episode ends after 31 days (1-31) of simulation.
+        
+        Compressor metadata:
+            {
+                "comp_id": "C1",          -> Unique identifier for the compressor
+                "capacity": 500,          -> Capacity of the compressor (ton/day)
+                "specific_energy": 450,   -> Specific energy consumption of the compressor (KWh/t)
+                "mttf": 18,               -> mean time to failure (days)
+                "mttr": 2                 -> mean time to repair (days)
+                "mntr": 5                 -> minimum no repair time (days)
+            }
+            Note: mttf, mttr, mntr \in Z  (set of integers)
+    """
+
+    def __init__(self, env_id: str, **kwargs: Any) -> None:
+        
+        state_horizon = 30
+        action_horizon = 1
+        T = 31
+        """
+            At the start of each day (1-31): 
+                - 30 days of demand data
+                - 30 days of price data
+
+            at the start of 31st day: we have data of 31st day itself and 29 coming days (total 30 days, making simulation days = 60)
+            i.e., episode length (T) = 31 days (1-31)
+        """
+        self.env_id = env_id
         
         # First initialize the compressors
         self.compressors = {}
         self.initialize_compressors("compressors_config.json")
-        """ compressor exemplar data format
-        {
-            "comp_id": "C1",          -> id
-            "capacity": 500,          -> ton/day  (150)
-            "specific_energy": 450,   -> KWh/t    (400)
-            "mttf": 18,               -> mean time to failure (days)
-            "mttr": 2                 -> mean time to repair (days)
-            "mntr": 5                 -> minimum no repair time (days)
-        }
-        Rest we have "C2" and "C3" with different values
-
-        Note: mttf, mttr, mntr \in Z  (set of integers)
-        """
 
         # Initialize the environment
+        self.action_horizon = action_horizon
         self.T = T    # episode length (days)
+        self._max_episode_steps = self.T
         self.simulation_days = self.T + state_horizon - action_horizon
         self.state_horizon = state_horizon
-        self.current_day = 0  # Start of Day: "current_day + 1"
+        self.current_day = 0    # Start of Day: "current_day + 1"
         
         self._initialize_simulation_data()
         self._initialize_observation_space()
@@ -206,13 +237,22 @@ class GASU(gym.Env):
         self.Penalty_ramp = 1 * 1e5
         self.Penalty_demand = 1 * 1e5
         
-        self.done = False
-        self.info = {}  
-        self.env_spec_log = {'Total penalty: Generator lower bound violations':0,'Number of Generator lower bound violations':0,
-                        'Total penalty: Generator upper bound violations':0,'Number of Generator upper bound violations':0,
-                        'Number of Transmission power bound violations':0, 'Number of Demand violations': 0,'Total penalty: Demand violations': 0,
-                        'Number of negative power violations': 0,'Total penalty: negative power violations': 0
-                        }
+        self.terminated = False
+        self.truncated = False
+        self.reward = 0
+        self.cost = 0
+
+        self.env_spec_log = {'Number of Maintenance-Duration Violation': 0,
+                             'Penalty of Maintenance-Duration Violation': 0,
+                             'Number of Maintenance-Failure Violation': 0,
+                             'Penalty of Maintenance-Failure Violation': 0,
+                             'Number of Early-Maintenance Violation': 0,
+                             'Penalty of Early-Maintenance Violation': 0,
+                             'Number of Ramping-in-Maintenance Violation': 0,
+                             'Penalty of Ramping-in-Maintenance Violation': 0,
+                             'Number of Demand-Unsatisfaction Violation': 0,
+                             'Penalty of Demand-Unsatisfaction Violation': 0,
+                            }
 
     def _initialize_simulation_data(self):
         demand_simulator = Demand_simulator(self.simulation_days, self.compressors)
@@ -223,7 +263,7 @@ class GASU(gym.Env):
         price_array = price_simulator.get_price_array()
         self.price_array = price_array
              
-    def reset(self, seed = 0, options = None):
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         self.current_day = 0
         # self._initialize_simulation_data()
         self._initialize_state()
@@ -398,6 +438,11 @@ class GASU(gym.Env):
                 penalty += self.Penalty_maint_duration * math.exp(tlcm[i])            
             elif tlcm[i] < 0 and maint_action[i] == 1:
                 penalty += -self.Penalty_maint_duration * math.exp(tlcm[i])
+
+        if penalty > 0:
+            self.env_spec_log['Number of Maintenance-Duration Violation'] += 1
+            self.env_spec_log['Penalty of Maintenance-Duration Violation'] += penalty
+
         return penalty
 
     def maintenance_failure_time_penalty(self, action):
@@ -411,6 +456,11 @@ class GASU(gym.Env):
                 penalty += self.Penalty_maint_failure_time 
             elif tslm[i] > comp.mttf and action["maintenance_action"][i] == 0:
                 penalty += self.Penalty_maint_failure_time * (tslm[i] - comp.mttf)
+        
+        if penalty > 0:
+            self.env_spec_log['Number of Maintenance-Failure Violation'] += 1
+            self.env_spec_log['Penalty of Maintenance-Failure Violation'] += penalty
+
         return penalty
 
     def early_maintenance_penalty(self, action):
@@ -425,6 +475,10 @@ class GASU(gym.Env):
             comp = self.compressors[cid]
             if maintenance_actions[i] == 1 and cdm[i] == 0 and tlcm[i] == 0:
                 penalty += self.Penalty_early_maint * tslm[i]
+
+        if penalty > 0:
+            self.env_spec_log['Number of Early-Maintenance Violation'] += 1
+            self.env_spec_log['Penalty of Early-Maintenance Violation'] += penalty
         return penalty
 
     def ramp_penalty(self, action):
@@ -440,6 +494,10 @@ class GASU(gym.Env):
             # Penalize if compressor is under maintenance AND producing
             if maintenance_actions[i] == 1 and production_quantity > 0:
                 penalty += self.Penalty_ramp * production_quantity
+
+        if penalty > 0:
+            self.env_spec_log['Number of Ramping-in-Maintenance Violation'] += 1
+            self.env_spec_log['Penalty of Ramping-in-Maintenance Violation'] += penalty
         return penalty
 
     def demand_penalty(self, action):
@@ -463,6 +521,11 @@ class GASU(gym.Env):
         # Apply penalty if demand not met exactly
         if abs(demand_today - total_supplied) > 10:
             penalty = self.Penalty_demand * abs(demand_today - total_supplied)
+
+        if penalty > 0:
+            self.env_spec_log['Number of Demand-Unsatisfaction Violation'] += 1
+            self.env_spec_log['Penalty of Demand-Unsatisfaction Violation'] += penalty
+
         return penalty
       
     def sanitize_action(self, action):
@@ -562,13 +625,11 @@ class GASU(gym.Env):
         self.info[self.current_day+1]["penalty_demand"] = int(penalty_demand > 0)
         # USE self.logger for above.
 
-        # TOTAL cost = cost + penalties
-        total_cost = cost + penalty_LMD + penalty_MTTF + penalty_maint + penalty_ramp + penalty_demand
-        # self.reward = -total_cost
-        self.reward += -total_cost
-
-        self.current_day += self.action_horizon      # 1 day
+        # Positive cost (penalties) incurred.
+        self.cost += penalty_LMD + penalty_MTTF + penalty_maint + penalty_ramp + penalty_demand
+        self.reward += -cost
         
+        self.current_day += self.action_horizon      # 1 day
         self.sanitize_action(action_dict)            # To prevent state bound violations     
         self.update_information_state()
         self.update_compressor_physical_condition_state(action_dict)
@@ -578,12 +639,25 @@ class GASU(gym.Env):
         
         self.flatt_state = self.encode_observation(self.state)
 
-        return self.flatt_state, self.reward, self.done, truncated, self.info
+        return self.flatt_state, self.reward - self.cost, self.done, truncated, self.info
+    
+    @property
+    def max_episode_steps(self) -> int:
+        return self.T
 
     def render(self, mode='human'):
-        print("state:",f"{self.state}")
-        print("cost:",f"{self.cost_ep}")
-        print("Specification:",f"{self.env_spec_log}")
+        print("state:", f"{self._get_state(mode='dict')}")
+        print("reward:", f"{self.reward}")
+        print("cost:", f"{self.cost}")
+        print("specification:", f"{self.env_spec_log}")
+
+    def close(self) -> None:
+        return None
+
+    def set_seed(self, seed: int) -> None:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
 
     def render_information_state(self):
         return self.state_demand, self.state_price
