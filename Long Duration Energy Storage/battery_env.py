@@ -14,21 +14,20 @@ import torch
 
 class BatteryOperationEnv(gym.Env):
     """
-    Reinforcement‐learning environment for strategic battery dispatch in a transmission grid.
+    Environment for strategic battery dispatch in a transmission grid.
 
-    Problem
+    Problem Description
     -------
-    We seek to train an RL agent to operate a fleet of energy storage units (batteries)
-    connected across a simple network of buses and transmission lines.  At each hour, the
-    agent chooses how much each generator should produce, how much each battery should
-    charge or discharge, plus any slack generation or load‐shedding needed for feasibility.
-    Behind the scenes, a DC‐power‐flow model enforces network constraints and a linear
-    battery state‐of‐charge (SOC) equation enforces the storage dynamics.  The goal is to
-    minimize total operating cost (fuel cost, plus penalties for load‐shedding and slack).
+    We model a network of buses, transmission lines, generators, and energy storage
+    units (batteries) over a finite time horizon (e.g. 24 hours).  At each time step,
+    the environment accepts continuous control inputs for generator outputs, battery
+    charge/discharge rates, slack generation, and load‐shedding.  It then applies a
+    DC power‐flow calculation and linear battery SOC update to enforce network and
+    storage constraints, and computes operating costs and penalties.
 
     Observation Space
     -----------------
-    A flat Box of length (2·N + 2·L + 1), where N = number of buses, L = number of lines:
+    A flat Box of length (2·N + 2·L + 1), where N = number of buses and L = number of lines:
       1. demand[n]        ∈ [0, max_demand]       (length N)
       2. normalized SOC   ∈ [0, 1]                (length N)
       3. wildfire risk    ∈ [0, 1] (normalized)   (length L)
@@ -44,8 +43,8 @@ class BatteryOperationEnv(gym.Env):
       4. slack generation g_slack[n] ∈ [0, gslack_max]         (length N)
       5. load‐shedding p_ls[n]       ∈ [0, max_demand]         (length N)
 
-    Model Parameters
-    ----------------
+    Parameters
+    ----------
     - time_periods: planning horizon T (e.g. 24 hours)
     - Buses, TransmissionLines: network topology
     - BusGeneratorLink: mapping each generator → bus
@@ -58,39 +57,39 @@ class BatteryOperationEnv(gym.Env):
     - UpperBatteryChargeRate/DischargeRate[n]
     - ChargeEfficiency η, CarryOverRate h
     - GeneratorCost[(g,j)]: polynomial cost coefficients
-    - Kls, Kslack: penalties for load‐shed and slack
+    - Kls, Kslack: penalties for load‐shedding and slack
     - gslack_max: hard cap on slack generation
     - P, D: large constants for penalizing bound violations
 
-    State Transitions (step function)
-    ---------------------------------
+    State Transitions (step method)
+    --------------------------------
     1. Clip and unpack actions into (g, p_c, p_d, g_slack, p_ls).
     2. SOC update:  
        E_t = h·E_{t−1} + η·p_c – (1/η)·p_d  
-       ↳ exactly matches Pyomo’s SOC_Balance_Cons.
-    3. Nodal injection P_n = ∑_{g→n} g_g + g_slack_n – demand_n + p_ls_n – p_c_n + p_d_n  
-       ↳ matches Power_Balance_Cons.
+       (matches the SOC_Balance constraint).
+    3. Nodal injection:  
+       P_n = ∑_{g→n} g_g + g_slack_n – demand_n + p_ls_n – p_c_n + p_d_n  
+       (matches the power‐balance constraint).
     4. DC power‐flow solve:  
-       B_red · θ_red = P_red  (θ_ref = 0)  
-       ↳ matches the dual equality of Pyomo’s power‐flow constraints.
-    5. Line flows: f = –B_lines · θ, then clip to ±LinePowerFlowLimit.  
-    6. Cost & reward:  
-       gen_cost = ∑_{g,j} c_{g,j}·g_g^j  
-       + Kls·∑ p_ls + Kslack·∑ g_slack  
-       + penalty from any bound violations  
+       B_red · θ_red = P_red  (θ_ref = 0).
+    5. Line flows:  
+       f = –B_lines · θ, then clipped to ±flow limits.
+    6. Cost calculation:  
+       generator cost + Kls·∑p_ls + Kslack·∑g_slack  
+       plus any bound‐violation penalties.  
        reward = –total_cost.
-    7. Advance time, rebuild observation from (demand, E, risk, flow, time).
+    7. Advance time, rebuild observation.
 
     Termination
     -----------
-    Episode terminates (truncated=False) when time index t exceeds the horizon T.
+    Episode terminates when the internal time index t exceeds the horizon T.
     """
 
     def __init__(self, env_id: str = 'Battery-v0', **kwargs):
         super().__init__()
         self.env_id = env_id
 
-        # 1) Default parameters (from Pyomo model)
+        # 1) Default parameters
         self.time_periods = 24
         self.Buses = [1, 2, 3]
         self.Generators = [1, 2]
@@ -112,7 +111,7 @@ class BatteryOperationEnv(gym.Env):
         self.LineLowerVoltageAngle = {(1,2):-0.2,(2,3):-0.2}
         self.GeneratorUpperLimit = {1:100.0, 2:100.0}
         self.GeneratorLowerLimit = {1:0.0,   2:0.0}
-        self.BatteryUpLimit    = {n: 1.0 for n in self.Buses}   # energy capacity per battery
+        self.BatteryUpLimit    = {n: 1.0 for n in self.Buses}  
         self.BatteryInitialCharge    = {n:0.5 for n in self.Buses}
         self.UpperBatteryChargeRate  = {n:1.0 for n in self.Buses}
         self.UpperBatteryDischargeRate ={n:1.0 for n in self.Buses}
@@ -122,7 +121,8 @@ class BatteryOperationEnv(gym.Env):
         self.GeneratorCost     = {(1,0):0.0,(1,1):20.0,(2,0):0.0,(2,1):25.0}
         self.Kls    = 20_000
         self.Kslack = 50 * self.Kls
-        self.gslack_max = 1e4       # slack gen upper bound
+        self.gslack_max = 1e4     
+
         # penalties
         self.P = 1e3
         self.D = 1e3
@@ -296,33 +296,6 @@ class BatteryOperationEnv(gym.Env):
         obs = self._get_state()
         return obs, {'dict_state': self.state, 'terminated': self.terminated}
 
-    def sanitize_action(self, action: np.ndarray) -> np.ndarray:
-        """
-        Clip actions to physical bounds.
-        """
-        return np.clip(action,
-                       self.action_space.low,
-                       self.action_space.high)
-
-    def check_action_bounds_cost(self, action: np.ndarray) -> np.ndarray:
-        """
-        Clip & penalize any remaining bound violations.
-        """
-        clipped = action.copy()
-        low, high = self.action_space.low, self.action_space.high
-        for i in range(len(clipped)):
-            if clipped[i] < low[i]:
-                diff = low[i] - clipped[i]
-                self.env_spec_log['Number of Action Bound Violations'] += 1
-                self.env_spec_log['Penalty of Action Bound Violations'] += diff**2 + self.P
-                clipped[i] = low[i]
-            elif clipped[i] > high[i]:
-                diff = clipped[i] - high[i]
-                self.env_spec_log['Number of Action Bound Violations'] += 1
-                self.env_spec_log['Penalty of Action Bound Violations'] += diff**2 + self.P
-                clipped[i] = high[i]
-        return clipped
-
     def check_obs_bounds_cost(self, obs: np.ndarray) -> np.ndarray:
         """
         Clip & penalize observation violations.
@@ -342,81 +315,113 @@ class BatteryOperationEnv(gym.Env):
                 clipped[i] = high[i]
         return clipped
 
-    def step(self, raw_action):
+    def sanitize_action(self, action: np.ndarray) -> np.ndarray:
         """
-        Apply continuous actions and advance one time step.
+        Detect any out-of-bounds action components (using the raw input),
+        log & penalize those violations, then clip to [low, high].
 
         Parameters
         ----------
-        raw_action : np.ndarray or torch.Tensor
-            [g, p_c, p_d, g_slack, p_ls]
+        action : np.ndarray
+            Raw continuous action vector of length G+4N.
+
+        Returns
+        -------
+        np.ndarray
+            Clipped action vector.
+        """
+        low, high = self.action_space.low, self.action_space.high
+        clipped = action.copy()
+        # check raw action before clipping
+        for i in range(len(action)):
+            if action[i] < low[i]:
+                diff = low[i] - action[i]
+                self.env_spec_log['Number of Action Bound Violations']    += 1
+                self.env_spec_log['Penalty of Action Bound Violations']   += diff**2 + self.P
+                clipped[i] = low[i]
+            elif action[i] > high[i]:
+                diff = action[i] - high[i]
+                self.env_spec_log['Number of Action Bound Violations']    += 1
+                self.env_spec_log['Penalty of Action Bound Violations']   += diff**2 + self.P
+                clipped[i] = high[i]
+        return clipped
+
+    def step(self, raw_action):
+        """
+        Advance one hour with the continuous control vector
+        [g, p_c, p_d, g_slack, p_ls].
 
         Returns
         -------
         obs        : np.ndarray
-        reward     : float
-        terminated : bool
-        truncated  : bool
-        info       : dict (contains 'dict_state' & 'terminated')
+        reward     : float   ( = – total operating cost )
+        terminated : bool    (True once the horizon is exhausted)
+        truncated  : bool    (always False)
+        info       : dict    {'dict_state': nested-state, 'terminated': terminated}
         """
         truncated = False
-        # reset per-step penalty cost
-        self.cost = 0.0
+        self.cost = 0.0  # reset per-step penalty pot
 
-        # 1) parse & clip action
+        # 1) parse, log & clip action in one go
         act = raw_action.numpy() if torch.is_tensor(raw_action) else raw_action
         act = self.sanitize_action(act)
-        act = self.check_action_bounds_cost(act)
 
         # 2) unpack slices
         G, N = self.G, self.N
-        g      = act[       : G]
-        pc     = act[  G   : G+N]
-        pd     = act[ G+N  : G+2*N]
-        gs     = act[ G+2*N: G+3*N]
-        ls     = act[ G+3*N: G+4*N]
+        g   = act[       : G]
+        pc  = act[   G   : G+N]
+        pd  = act[ G+N   : G+2*N]
+        gs  = act[ G+2*N : G+3*N]
+        ls  = act[ G+3*N : G+4*N]
 
-        # 3) state transitions
-        # 3a) update SOC
+        # 3a) SOC update
         self.E = (self.CarryOverRate * self.E
                   + self.ChargeEfficiency * pc
-                  - (1/self.ChargeEfficiency) * pd)
+                  - (1.0 / self.ChargeEfficiency) * pd)
 
-        # 3b) net injections P = G + slack - demand + shed - charge + discharge
+        # 3b) demand & enforce p_ls ≤ demand
         dem = np.array([self.demand[(n, self.t)] for n in self.Buses],
                        dtype=np.float32)
-        P   = self.gen_to_bus @ g + gs - dem + ls - pc + pd
+        ls  = np.minimum(ls, dem)
 
-        # 3c) solve θ (θ[0]=0)
+        # 3c) net nodal injection
+        P = (self.gen_to_bus @ g) + gs - dem + ls - pc + pd
+
+        # 3d) DC power-flow solve (θ[0]=0)
         theta = np.zeros(self.N, dtype=np.float32)
         theta[1:] = np.linalg.solve(self.B_reduced, P[1:])
 
-        # 3d) flows & clip
-        f = - self.B_lines @ theta
-        self.last_flow = np.clip(f, -self.p_lim_vec, self.p_lim_vec)
+        # 3e) line flows & penalize overloads
+        f = -self.B_lines @ theta
+        self.last_flow = f
+        over = np.abs(f) - self.p_lim_vec
+        viol = over[over > 0.0]
+        if viol.size > 0:
+            self.cost += np.sum(viol**2) + self.P * len(viol)
 
         # 4) cost & reward
         gen_cost = 0.0
         for j in range(self.PolynomialDegree):
-            coeffs = np.array([
-                self.GeneratorCost.get((g_id, j), 0.0)
-                for g_id in self.Generators
-            ], dtype=np.float32)
+            coeffs = np.array([self.GeneratorCost.get((g_id, j), 0.0)
+                               for g_id in self.Generators],
+                              dtype=np.float32)
             gen_cost += np.sum(coeffs * (g ** j))
         slack_cost = self.Kslack * np.sum(gs)
         shed_cost  = self.Kls    * np.sum(ls)
         total_cost = gen_cost + slack_cost + shed_cost + self.cost
-        self.reward = - total_cost
+        self.reward = -total_cost
 
-        # 5) advance time & rebuild state
-        self.t += 1
-        self._build_initial_state()   # reuse builder to update self.state
+        # 5) build obs before advancing time
+        self._build_initial_state()  # refresh self.state for period t
         obs = self._get_state()
         obs = self.check_obs_bounds_cost(obs)
 
-        self.terminated = (self.t > self.T)
-        info = {'dict_state': self.state, 'terminated': self.terminated}
-        return obs, self.reward, self.terminated, truncated, info
+        # 6) advance time & termination
+        self.t += 1
+        terminated = (self.t > self.T)
+
+        info = {'dict_state': self.state, 'terminated': terminated}
+        return obs, self.reward, terminated, truncated, info
 
     def render(self, mode='human'):
         """
