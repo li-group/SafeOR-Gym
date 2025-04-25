@@ -1,14 +1,8 @@
 '''
-ASU Environment: Liquid Products
+ASU Production Scheduling: Liquid Products (LIN, LOX, LAR)
 Akshdeep Singh Ahluwalia 
-
-SAFE RL: TO ENSURE INVENTORY BOUNDS and Demand Satisfaction
 '''
 
-"""  
-Physical state: Initial inventory
-Information state: El prices and demand forecast
-"""
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces    # https://gymnasium.farama.org/
@@ -25,9 +19,6 @@ import random
 from scipy.spatial import ConvexHull
 from simulate_state import Get_electricity_dataframe, Get_demand_dataframe
 
-# Constants for penalties (tune these as necessary)
-INVENTORY_PENALTY_FACTOR = 20.0      # Penalty per unit of inventory exceeding maximum
-DEMAND_PENALTY_FACTOR = 20.0         # Penalty per unit demand shortfall at end of day
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(current_dir, 'asu_config.json')
@@ -36,9 +27,41 @@ with open(config_path, 'r') as config_file:
     ASU_DATA_FILES = json.load(config_file)
 
 class ASUEnv(gym.Env):
-    def __init__(self, asu_name, lookahead, days_to_simulate):
+
+    """
+        ASU Production Scehduling Environment for SafeRL
+
+        This environment simulates the operation of an Air Separation Unit (ASU) for liquid products.
+
+        Attributes:
+        Observation Space:
+            - electricity_prices: Electricity prices for the next 24 hours.
+            - demand: Demand forecast for each product for the next 24 hours.
+            - IV: Current inventory levels for each product.
+        
+        Action Space:
+            - lambda: Production quantities for each product, constrained by the convex hull of production data.
+        
+        Reward:
+            - Negative of the total cost, which includes production cost
+
+        Penalties: 
+            - Inventory exceeding maximum capacity.
+            - Demand shortfall at the end of the day.
+
+    """
+
+    # def __init__(self, asu_name, lookahead, days_to_simulate):
+    def __init__(self, env_id: str, **kwargs: Any) -> None:
+
         super().__init__()
-        self.name = asu_name
+        self.name = env_id
+        
+        lookahead = 4
+        days_to_simulate = 7
+
+
+        self.env_id = env_id
 
         # Simulation time counters
         self.current_hour = 0  # hour in current day (0-23)
@@ -59,6 +82,18 @@ class ASUEnv(gym.Env):
         self.reward = 0
         self.done = False
         self.info = {}
+
+        # Constants for penalties (tune these as necessary)
+        self.iv_penalty_factor = 20.0      # Penalty per unit of inventory exceeding maximum
+        self.demand_penalty_factor = 20.0         # Penalty per unit demand shortfall at end of day
+
+        self.env_spec_log = {'Number of Inventory Violation': 0,
+                        'Cost of Inventory Violation': 0,
+                        'Number of Demand Violation': 0,
+                        'Cost of Demand Violation': 0,
+                        }
+
+
 
     def _initialize_simulation_data(self):
         # Electricity simulation
@@ -261,14 +296,22 @@ class ASUEnv(gym.Env):
         # --- Penalty 1: Demand Shortfall at End of Day ---
         # Calculate demand shortfall
         demand_shortfall = np.maximum(self.demand_today - ship_quantity, 0)
-        demand_penalty = DEMAND_PENALTY_FACTOR * np.sum(demand_shortfall)
+        demand_penalty = self.demand_penalty_factor * np.sum(demand_shortfall)
+
+        if demand_penalty > 0:
+            self.env_spec_log['Number of Demand Violation'] += 1
+            self.env_spec_log['Cost of Demand Violation'] += demand_penalty
         return demand_penalty
 
     def inventory_penalty(self, new_IV):
         # --- Penalty 2: Inventory Exceeding Maximum --- 
         # For each product, if new_IV > iv_high, impose a penalty proportional to the excess
         inventory_excess = np.maximum(new_IV - self.iv_high, 0)
-        inventory_penalty = INVENTORY_PENALTY_FACTOR * np.sum(inventory_excess)
+        inventory_penalty = self.iv_penalty_factor * np.sum(inventory_excess)
+
+        if inventory_penalty > 0:
+            self.env_spec_log['Number of Inventory Violation'] += 1
+            self.env_spec_log['Cost of Inventory Violation'] += inventory_penalty
         return inventory_penalty
 
     def step(self, action):
@@ -320,6 +363,9 @@ class ASUEnv(gym.Env):
         self.IV = new_IV.copy()
         # Shift the observation based on elapsed hours
         self.shift_observation()  
+
+        ## HERE MAKE FUCNTION TO UPDATE INVENTORY STATE
+        ## HOWEVER BEFORE CALLING, SANIRTIZE THE ACTION TO PREVENT TANK OVERFLOW
         self.state['IV'] = self.IV      
 
         # Total cost: production cost plus penalties
@@ -363,7 +409,7 @@ class ASUEnv(gym.Env):
         plt.legend()
         plt.show()
 
-    def _plot_electricity_prices(self):
+    def _plot_electricity_prices_state(self):
         """Plot the electricity prices for visualization."""
         import matplotlib.pyplot as plt
         hours = np.arange(24 * (1+self.lookahead_days))

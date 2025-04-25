@@ -41,6 +41,7 @@ class optimize_GASU:
         self._define_binary_variables()
         self._define_constraints()
         self._define_objective()
+        self._define_sets()        
 
     def _initialize_compressors(self, compressors):
         self.compressors = compressors
@@ -84,11 +85,24 @@ class optimize_GASU:
         self.model.y_i = pyo.Param(self.model.C, self.model.M, initialize=0, mutable=True, doc="Mode history")
         self.model.z_h = pyo.Param(self.model.C, self.model.M, self.model.M, self.model.T_z, initialize=0, mutable=True, doc="Switch history")
 
-    def update_state(self, state):
+    def decode_observation(self, flatt_state):
+        n = len(self.compressors)
+        S = self.state_horizon
+
+        return {
+            "demand": flatt_state[:S],
+            "electricity_price": flatt_state[S:2*S],
+            "TLCM": flatt_state[2*S:2*S+n],
+            "TSLM": flatt_state[2*S+n:2*S+2*n],
+            "CDM": flatt_state[2*S+2*n:2*S+3*n].astype(int)
+        }
+
+    def update_state(self, flatt_state):
         """
         Update the model with the current state.
         :param state: A dictionary containing the current state of the environment.
         """
+        state = self.decode_observation(flatt_state)
         demand_array = state['demand']
         price_array = state['electricity_price']
         
@@ -272,7 +286,23 @@ class optimize_GASU:
         
         objective_value = pyo.value(self.model.objective)
         return objective_value
-    
+
+    def encode_action(self, action_dict):
+        """
+        Converts a structured action dictionary into a flat NumPy array
+        compatible with the flat Box action space.
+        """
+        maintenance_action = np.array(action_dict["maintenance_action"], dtype=np.float32)  # shape (n,)
+        production_rate = np.array(action_dict["production_rate"], dtype=np.float32)        # shape (n,)
+        external_purchase = np.array(action_dict["external_purchase"], dtype=np.float32)    # shape (1,) or scalar
+
+        # Ensure external_purchase is a 1-element array
+        if external_purchase.ndim == 0:
+            external_purchase = np.array([external_purchase], dtype=np.float32)
+
+        flat_action = np.concatenate([maintenance_action, production_rate, external_purchase])
+        return flat_action
+
     def _fetch_optimal_action_for_action_horizon(self):
         action = {}
         t = 1  # Day 1
@@ -292,7 +322,9 @@ class optimize_GASU:
         # --- 3. External purchase
         ext_purchase = float(pyo.value(self.model.EXPQ[t]))
         action["external_purchase"] = np.array([ext_purchase], dtype=np.float32)
-        return action
+        
+        flat_action = self.encode_action(action)
+        return flat_action
     
     def action_horizon_cost(self):  
         t = 1  # action horizon is 1

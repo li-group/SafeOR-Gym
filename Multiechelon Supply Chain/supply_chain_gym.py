@@ -12,49 +12,65 @@ from utils import assign_env_config, flatten_and_track_mappings
 import torch
 import random
 
-"""
-Multi-Echelon Inventory Management Environment
-
-This environment simulates a multi-echelon supply chain with markets, retailers,
-distributors, producers, and raw distributors. Agents choose reorder quantities
-across transportation routes each time step to satisfy demand and manage inventory
-and backlogs. Costs include holding, operating, pipeline, and backlog penalties,
-with revenues from wholesale and retail sales.
-"""
-
 
 class InvMgmtEnv(gym.Env):
     """
-    Inventory Management Environment for a multi-echelon supply chain.
+    ------------------------------------------------------------------
+    Multi-Echelon Inventory-Management Environment
+    ------------------------------------------------------------------
 
-    Parameters
-    ----------
-    env_id : str, default='InvMgmt-v0'
-        Unique identifier for the environment variant.
-    **kwargs
-        Environment configuration overrides (e.g., T=100, demand_parameters={'mean':20,'std':5,'seed':42}).
+    Problem Description
+       This environment represents a five-layer supply chain containing
+       markets, retailers, distributors, producers, and raw-material
+       distributors.  During every period the decision-maker chooses
+       continuous reorder quantities on each transportation route.  
+       Orders travel through fixed lead times, replenish on-hand stock,
+       satisfy stochastic customer demand, and may create backlogs.
+       After receiving the orders, the simulator
+         • updates all on-hand and pipeline inventories,  
+         • realises market demand and fulfils it if inventory is available,  
+         • carries forward any unfulfilled demand as backlog, and  
+         • computes the net profit (revenues minus costs and penalties)  
+       which is returned as the step reward.
 
-    Attributes
-    ----------
-    T : int
-        Planning horizon (number of time steps).
-    main_nodes : List[int]
-        Node indices for inventory-holding facilities.
-    reordering_routes : List[Tuple[int,int]]
-        Available transportation links for reordering.
-    retailer_routes : List[Tuple[int,int]]
-        Links from retailers to markets where final demand occurs.
-    env_spec_log : dict
-        Counters for action/observation bound violations and penalties.
-    observation_space : gym.Space
-        Flattened observation space.
-    action_space : gym.Space
-        Flattened action space.
-    state : dict
-        Current state with nested fields: on_hand_inventory, pipeline_inventory,
-        sales, backlog, demand_window, and time index t.
+    Observation Space
+       The flattened observation vector contains, in this order:
+         • On-hand inventory for every inventory-holding node.  
+         • Pipeline inventory for each reordering route, one element
+           per period of that route’s lead time (first in transit, second
+           in transit, …).  
+         • For each retailer-to-market link: sales made this period,
+           backlog carried to next period, realised demand.  
+         • Scaled time index (current period divided by total horizon).
+       The length of the vector equals:
+         number of main nodes
+         + total pipeline slots across all routes
+         + three times the number of retailer routes
+         + one time-index element.
 
+    Action Space
+       A flat Box whose length equals the number of reordering routes.
+       The agent supplies a value in the range −1 to 1 for every route;
+       the environment rescales that to a physical order quantity between
+       zero and the pre-defined capacity of that route.  Values below a
+       small threshold are treated as zero.
+
+    Key Environment Parameters (all can be overridden via **kwargs)
+         • T – planning horizon in periods  
+         • inv_capacity – storage capacity at each node  
+         • initial_inv – starting on-hand inventory  
+         • inventory_holding_cost – per-unit per-period cost  
+         • operating_cost and production_yield for producer nodes  
+         • material_holding_cost – cost for inventory in transit  
+         • unit_price – wholesale or retail selling price per route  
+         • lead_times – integer shipping lags per route  
+         • reordering_route_capacity – maximum order size per route  
+         • demand_parameters – mean, standard deviation, seed for demand  
+         • unfulfilled_utility_penalty – cost per unit of backlog  
+         • P – large constant added to every quadratic penalty term  
+         • eps – numerical threshold below which orders are treated as zero
     """
+
 
     def __init__(self, env_id: str = 'InvMgmt-v0', **kwargs):
         """
