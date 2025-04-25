@@ -3,6 +3,9 @@ FOR PSE GYM::
   --->>  Build optimization model along with ability to do external product purchase to handle infeasibility.
 
   --->>  y_i, IV_i and z_history have to be mutable parameters, demand and electricity prices have to be mutable parameters
+
+TWO MODES: ('ON' and 'OFF') 
+   - Satisfy daily demand for each product (considered to be feasible) with hourly product production. (lambdas' in convex hull)
 '''
 
 import pyomo.environ as pyo
