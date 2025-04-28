@@ -1,0 +1,46 @@
+{
+    "env_id": [
+        "rtn-v0"
+    ],
+    "seed": [
+        10
+    ],
+    "algo": [
+        "PolicyGradient",
+        "NaturalPG",
+        "TRPO",
+        "PPO",
+        "PPOLag",
+        "TRPOLag",
+        "RCPO",
+        "CUP",
+        "FOCOPS",
+        "P3O",
+        "CPO",
+        "PCPO"
+    ],
+    "logger_cfgs : use_wandb": [
+        false
+    ],
+    "logger_cfgs : use_tensorboard": [
+        true
+    ],
+    "train_cfgs:vector_env_nums": [
+        1
+    ],
+    "train_cfgs:torch_threads": [
+        1
+    ],
+    "train_cfgs:total_steps": [
+        100
+    ],
+    "model_cfgs:actor:output_activation": [
+        "tanh"
+    ],
+    "algo_cfgs:steps_per_epoch": [
+        20
+    ],
+    "train_cfgs:device": [
+        "cuda:0"
+    ]
+}

@@ -28,7 +28,7 @@ from omnisafe.utils.exp_grid_tools import train
 from omnisafe.common.experiment_grid import ExperimentGrid
 
 
-from environment import SafeRTN
+from environment import SafeSTN
 
 
 def main(args, env_id):
@@ -42,10 +42,10 @@ def main(args, env_id):
         'env_init_config' : {
             'config_file' : args.env_config,
             'debug' : args.debug
-        }    
+        }
     })
     
-    env = SafeRTN('rtn-v0', **custom_cfgs)
+    env = SafeSTN('stn-v0', **custom_cfgs)
     env.reset(seed=0)
 
     while True:
@@ -66,8 +66,8 @@ def main(args, env_id):
             break
     env.close()
 
-    agent = Agent(ALGO, 'rtn-v0', custom_cfgs = custom_cfgs)  # pass empty custom_cfgs
-    agent.learn()
+    # agent = Agent(ALGO, 'rtn-v0', custom_cfgs = custom_cfgs)  # pass empty custom_cfgs
+    # agent.learn()
 
 
     # eg = ExperimentGrid(exp_name = 'Benchmark_Safety_rtn_v0')
