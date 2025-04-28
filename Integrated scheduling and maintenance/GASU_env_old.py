@@ -4,7 +4,6 @@ Akshdeep Singh Ahluwalia
 '''
 
 import random
-import json
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
 import torch
 import numpy as np
@@ -15,13 +14,116 @@ from gymnasium.spaces.utils import flatten_space
 from gymnasium import spaces        # https://gymnasium.farama.org/
 from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete, MultiBinary
 from gymnasium.utils import seeding
+import json
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 import os, sys
 from PIL import Image, ImageDraw, ImageFont
 import math
-             
+
+# --- Compressor Class ---
+class Compressor:
+    def __init__(self, comp_id, capacity, specific_energy, mttf, mttr, mntr, TLCM, TSLM, CDM):
+        self.comp_id = comp_id
+        self.capacity = capacity
+        self.specific_energy = specific_energy
+        self.mttf = mttf
+        self.mttr = mttr
+        self.mntr = mntr
+        self.TLCM = TLCM
+        self.TSLM = TSLM
+        self.CDM = CDM
+
+    def get_dict(self):
+        comp_dict = {
+            "comp_id": self.comp_id,
+            "capacity": self.capacity,
+            "specific_energy": self.specific_energy,
+            "mttf": self.mttf,
+            "mttr": self.mttr,
+            "mntr": self.mntr,
+            "TLCM": self.TLCM,
+            "TSLM": self.TSLM,
+            "CDM": self.CDM,
+            
+        }
+        return comp_dict
+
+    def info(self):
+        return (
+            f"Compressor {self.comp_id} → "
+            f"Capacity: {self.capacity} ton/day, "
+            f"Specific energy: {self.specific_energy} KWh/t, "
+            f"MTTF: {self.mttf} days, "
+            f"MTTR: {self.mttr} days, "
+            f"MNTR: {self.mntr} days "
+            f"TLCM: {self.TLCM} "
+            f"TSLM: {self.TSLM} "
+            f"CDM: {self.CDM} "
+        )
+    
+class Demand_simulator:
+    def __init__(self, duration, compressors, gamma=1):
+        self.seed = 42
+        np.random.seed(self.seed)
+        self.duration = duration
+        self.compressors = compressors
+        self.total_capacity = sum(comp.capacity for comp in compressors.values())
+        self.gamma = gamma
+        self.max_demand = self.gamma * self.total_capacity
+
+    def get_demand_array(self):
+        days = np.arange(self.duration)
+
+        # Seasonal effect: strong sine wave with 1 full cycle per 30 days
+        seasonal_effect = 0.6 + 0.4 * np.sin(2 * np.pi * days / 10)
+
+        # Step changes: every 30 days, simulate a change in base demand level
+        base_levels = np.random.uniform(0.6, 0.8, size=(self.duration // 30 + 1))
+        step_effect = np.repeat(base_levels, 30)[:self.duration]
+
+        # Random noise: small normally distributed fluctuations
+        noise = np.random.normal(0, 0.03, self.duration)
+
+        # Combine effects and scale to maximum allowed demand
+        demand = 1.2*(seasonal_effect * step_effect + noise) * self.max_demand
+
+        # Clip to [0, max_demand]
+        demand = np.clip(demand, 0, self.max_demand)
+        demand = demand + 300
+        self.demand_array = demand
+        return self.demand_array
+    
+class Electric_price_simulator:
+    def __init__(self, duration):
+        self.duration = duration
+        self.price_array = np.zeros(duration)  # $/kWh
+        self.seed = 42
+        np.random.seed(self.seed)
+
+    def get_price_array(self):
+        base_price = 0.0832           # average industrial price in the US in $/kWh
+        days = np.arange(self.duration)
+
+        # Weekly cycle: higher prices Mon-Fri, lower Sat-Sun
+        weekly_cycle = 1 + 0.015 * np.sin(2 * np.pi * days / 7)
+
+        # Seasonal trend: gradual increase
+        seasonal_trend = 1 + 0.0002 * days  # mild upward drift
+
+        # Random noise: ±0.005 around the trend
+        random_fluctuation = np.random.normal(0, 0.003, size=self.duration)
+
+        # Final price calculation
+        price = base_price * weekly_cycle * seasonal_trend + random_fluctuation
+
+        # Ensure non-negative prices
+        price = np.clip(price, 0, None)
+
+        self.price_array = price
+        return self.price_array  # $/kWh
+           
 # --- Plant Class ---
 class GASU(gym.Env):
 
@@ -45,16 +147,16 @@ class GASU(gym.Env):
             Num     Observation
             0       Demand
             1       Electricity price 
-            2       Time Left to Complete Maintenance (of each compressor) 
-            3       Time Since Last Maintenance (of each compressor) 
-            4       Can Do Maintenance (of each compressor) 
+            2       Time Left to Complete Maintenance 
+            3       Time Since Last Maintenance 
+            4       Can Do Maintenance 
 
         Action:
-            Type: Box(3 * n =(compressors))
+            Type: Box(3)
             Num     Action
-            0       Maintenance action (0 or 1)    : for each compressor
-            1       Production rate (0 to 1)       : for each compressor
-            2       External purchase (0 to 10000) : for each compressor
+            0       Maintenance action (0 or 1)
+            1       Production rate (0 to 1)
+            2       External purchase (0 to 10000)
 
         Reward:
             Type: float
@@ -141,22 +243,13 @@ class GASU(gym.Env):
                             }
 
     def _initialize_simulation_data(self):
-        try:
-            with open('gasu_config.json', 'r') as f:
-                config = json.load(f)
+        demand_simulator = Demand_simulator(self.simulation_days, self.compressors)
+        demand_array = demand_simulator.get_demand_array()
+        self.demand_array = demand_array
 
-            with open(config["demand"], 'r') as f_demand, open(config["electricity"], 'r') as f_electricity:
-                demand_data = json.load(f_demand)
-                price_data = json.load(f_electricity)
-
-            self.demand_array = np.array(demand_data["demand"], dtype=np.float64)
-            self.price_array = np.array(price_data["electricity_prices"], dtype=np.float64)
-
-            return self.demand_array, self.price_array
-        
-        except (FileNotFoundError, KeyError, json.JSONDecodeError) as e:
-            raise RuntimeError(f"Failed to initialize simulation data: {e}")
-
+        price_simulator = Electric_price_simulator(self.simulation_days)
+        price_array = price_simulator.get_price_array()
+        self.price_array = price_array
              
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         self.current_day = 0
@@ -623,47 +716,9 @@ class GASU(gym.Env):
         plt.tight_layout()
         plt.show()
 
-      
+    # def plot_state_information(self):
 
+        
+    
+    
 
-
-# --- Compressor Class ---
-class Compressor:
-    def __init__(self, comp_id, capacity, specific_energy, mttf, mttr, mntr, TLCM, TSLM, CDM):
-        self.comp_id = comp_id
-        self.capacity = capacity
-        self.specific_energy = specific_energy
-        self.mttf = mttf
-        self.mttr = mttr
-        self.mntr = mntr
-        self.TLCM = TLCM
-        self.TSLM = TSLM
-        self.CDM = CDM
-
-    def get_dict(self):
-        comp_dict = {
-            "comp_id": self.comp_id,
-            "capacity": self.capacity,
-            "specific_energy": self.specific_energy,
-            "mttf": self.mttf,
-            "mttr": self.mttr,
-            "mntr": self.mntr,
-            "TLCM": self.TLCM,
-            "TSLM": self.TSLM,
-            "CDM": self.CDM,
-            
-        }
-        return comp_dict
-
-    def info(self):
-        return (
-            f"Compressor {self.comp_id} → "
-            f"Capacity: {self.capacity} ton/day, "
-            f"Specific energy: {self.specific_energy} KWh/t, "
-            f"MTTF: {self.mttf} days, "
-            f"MTTR: {self.mttr} days, "
-            f"MNTR: {self.mntr} days "
-            f"TLCM: {self.TLCM} "
-            f"TSLM: {self.TSLM} "
-            f"CDM: {self.CDM} "
-        )
