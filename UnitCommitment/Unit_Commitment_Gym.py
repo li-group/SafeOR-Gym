@@ -218,7 +218,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                                     4: np.zeros(1 + 1)}  # assume no change happened from - [max(UT, DT)+1] to 0
         # assume only 1st generator is on
         self.u_prev = self.u0_prev = np.array([1, 0, 0, 0, 0])
-        self.u = self.u0 = [1, 0, 0, 0, 0]
+        self.u = self.u0 = np.array([1, 0, 0, 0, 0])
         self.v, self.w = self._reckless_move(self.u, self.u_prev)
         self.v_seq, self.w_seq = self._u2vw_seq(self.u_seq)
 

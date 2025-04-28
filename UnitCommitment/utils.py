@@ -84,6 +84,22 @@ def init_model(args, data):
     C_RP = 100
     R = 10
 
+    u0_seq = {0: np.ones(8 + 1),  # assume only 1st generator is on
+              1: np.zeros(5 + 1),
+              2: np.zeros(5 + 1),
+              3: np.zeros(3 + 1),
+              4: np.zeros(1 + 1)}  # assume no change happened from - [max(UT, DT)+1] to 0
+    # assume only 1st generator is on
+    u0_prev = np.array([1, 0, 0, 0, 0])
+    u0 = np.array([1, 0, 0, 0, 0])
+    self.v, self.w = self._reckless_move(self.u, self.u_prev)
+    self.v_seq, self.w_seq = self._u2vw_seq(self.u_seq)
+
+    self.p_prev = self.p0_prev = np.array([300, 0, 0, 0, 0])
+    self.p = self.p0 = np.array([300, 0, 0, 0, 0])
+
+
+
     generators = range(num_gen)
     buses = range(num_bus)
     lines = range(num_line)
