@@ -9,7 +9,7 @@ import torch
 import numpy as np
 
 import scipy.stats as stats
-from or_gym.utils import assign_env_config
+from utils import assign_env_config
 # from or_gym.envs.power_system.forecast import get_random_25hr_forecast
 
 import gymnasium as gym
@@ -173,11 +173,11 @@ class UnitCommitmentMasterEnv(gym.Env):
         for line in self.lines:
             self.from_bus.append(self.line_bus[line][0])
             self.to_bus.append(self.line_bus[line][1])
-        self.from_bus_line = {i: [] for i in self.buses}
-        self.to_bus_line = {i: [] for i in self.buses}
+        self.from_bus_lines = {i: [] for i in self.buses}
+        self.to_bus_lines = {i: [] for i in self.buses}
         for line, (from_bus, to_bus) in self.line_bus.items():
-            self.from_bus_line[from_bus].append(line)
-            self.to_bus_line[to_bus].append(line)
+            self.from_bus_lines[from_bus].append(line)
+            self.to_bus_lines[to_bus].append(line)
 
         self.t = 0
         self.terminated = False
@@ -476,8 +476,8 @@ class UnitCommitmentMasterEnv(gym.Env):
         return repaired_flow
 
     def _compute_power_slack(self, p_new: np.ndarray, flow: np.ndarray, demand: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        flow_in = np.array([np.sum(flow[self.to_bus_line[b]]) for b in self.buses])
-        flow_out = np.array([np.sum(flow[self.from_bus_line[b]]) for b in self.buses])
+        flow_in = np.array([np.sum(flow[self.to_bus_lines[b]]) for b in self.buses])
+        flow_out = np.array([np.sum(flow[self.from_bus_lines[b]]) for b in self.buses])
         flow_diff = flow_in - flow_out
         s = demand - np.array([np.sum(p_new[self.bus_gen[b]]) for b in self.buses]) - flow_diff
         overflow = np.maximum(0, s)
