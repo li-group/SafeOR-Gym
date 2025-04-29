@@ -286,7 +286,7 @@ if __name__ == '__main__':
     # # env_config does not accept array, here I use the default config in env
     eg.add('env_cfgs:env_init_config:scale_action', [True])
     # recurse(eg, env_config)
-    # eg.add('model_cfgs:actor:output_activation', ['tanh']) todo: need to implement my custom activation function
+    eg.add('model_cfgs:actor:output_activation', ['tanh'])
     eg.add('algo_cfgs:steps_per_epoch', steps_per_epoch)
     eg.add('train_cfgs:total_steps', total_steps)
     eg.add('seed', [0])

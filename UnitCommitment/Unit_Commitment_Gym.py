@@ -582,7 +582,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         return self.terminated
 
     def _scale_and_round_action(self, on_off, power, angle):
-        if torch.is_tensor(action):
+        if torch.is_tensor(on_off):
             action_low = {key: torch.as_tensor(value, device=self._device) for key, value in self.action_low.items()}
             action_high = {key: torch.as_tensor(value, device=self._device) for key, value in self.action_high.items()}
         else:
