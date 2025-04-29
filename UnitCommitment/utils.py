@@ -69,11 +69,17 @@ def init_model(args, data):
     generators = range(num_gen)
     buses = range(num_bus)
     lines = range(num_line)
-    from_bus = {}
-    to_bus = {}
+    # line_from_bus = {k: [] for k in lines}
+    # line_to_bus = {k: [] for k in lines}
+    # for line in lines:
+    #     line_from_bus[line].append(line_bus[line][0])
+    #     line_to_bus[line].append(line_bus[line][1])
+    line_from_bus = {}
+    line_to_bus = {}
     for line in lines:
-        from_bus.update({line: line_bus[line][0]})
-        to_bus.update({line: line_bus[line][1]})
+        line_from_bus[line] = line_bus[line][0]
+        line_to_bus[line] = line_bus[line][1]
+
     from_bus_lines = {i: [] for i in buses}
     to_bus_lines = {i: [] for i in buses}
     for line, (from_bus, to_bus) in line_bus.items():
@@ -130,8 +136,8 @@ def init_model(args, data):
     model.buses = pe.Set(initialize=buses)
     model.lines = pe.Set(initialize=lines)
     model.bus_gen = pe.Set(model.buses, initialize=bus_gen)
-    model.from_bus = pe.Param(model.lines, initialize=from_bus)
-    model.to_bus = pe.Param(model.lines, initialize=to_bus)
+    # model.line_from_bus = pe.Set(model.lines, initialize=lambda m, l: line_bus[l][0])
+    # model.line_to_bus = pe.Set(model.lines, initialize=lambda m, l: line_bus[l][0])
     model.from_bus_lines = pe.Set(model.buses, initialize=from_bus_lines)
     model.to_bus_lines = pe.Set(model.buses, initialize=to_bus_lines)
     model.v_prev_set = pe.Set(initialize=v_prev_set)
@@ -157,12 +163,12 @@ def init_model(args, data):
     model.pi = pe.Var(model.T_set, model.buses, domain=pe.Reals)
     model.f = pe.Var(model.T_set, model.lines, domain=pe.Reals)
 
-    model.production_cost = pe.Var()
-    model.startup_cost = pe.Var()
-    model.shutdown_cost = pe.Var()
-    model.load_shedding_cost = pe.Var()
-    model.reserve_penalty_cost = pe.Var()
-    model.total_cost = pe.Var()
+    model.production_cost = pe.Var(model.T_set)
+    model.startup_cost = pe.Var(model.T_set)
+    model.shutdown_cost = pe.Var(model.T_set)
+    model.load_shedding_cost = pe.Var(model.T_set)
+    model.reserve_penalty_cost = pe.Var(model.T_set)
+    model.total_cost = pe.Var(model.T_set)
 
     model.P_max = pe.Param(model.generators, initialize={i: P_max[i] for i in generators})
     model.P_min = pe.Param(model.generators, initialize={i: P_min[i] for i in generators})
@@ -256,31 +262,31 @@ def init_model(args, data):
     model.ramp_down = pe.Constraint(model.T_set, model.generators, rule=ramp_down_rule)
 
     # Cost Function and Objective
-    def production_cost_rule(m):
-        return m.production_cost == sum(m.a[i] * (m.p[t, i] ** 2) + m.b[i] * m.p[t, i] + m.c[i] for i in m.generators for t in m.T_set)
+    def production_cost_rule(m, t):
+        return m.production_cost[t] == sum(m.a[i] * (m.p[t, i] ** 2) + m.b[i] * m.p[t, i] + m.c[i] for i in m.generators)
 
-    def startup_cost_rule(m):
-        return m.startup_cost == sum(m.v[t, i] * m.hot_cost[i] for i in m.generators for t in m.T_set)
+    def startup_cost_rule(m, t):
+        return m.startup_cost[t] == sum(m.v[t, i] * m.hot_cost[i] for i in m.generators)
 
-    def shutdown_cost_rule(m):
-        return m.shutdown_cost == sum(m.w[t, i] * m.C_SD[i] for i in m.generators for t in m.T_set)
+    def shutdown_cost_rule(m, t):
+        return m.shutdown_cost[t] == sum(m.w[t, i] * m.C_SD[i] for i in m.generators)
 
-    def load_shedding_cost_rule(m):
-        return m.load_shedding_cost == sum(m.C_LS * (m.s_pos[t, n] + m.s_neg[t, n]) for n in m.buses for t in m.T_set)
+    def load_shedding_cost_rule(m, t):
+        return m.load_shedding_cost[t] == sum(m.C_LS * (m.s_pos[t, n] + m.s_neg[t, n]) for n in m.buses)
 
-    def reserve_penalty_cost_rule(m):
-        return m.reserve_penalty_cost == sum(m.C_RP * m.sr[t] for t in m.T_set)
+    def reserve_penalty_cost_rule(m, t):
+        return m.reserve_penalty_cost[t] == m.C_RP * m.sr[t]
 
-    def total_cost_rule(m):
-        return (m.total_cost == m.production_cost + m.startup_cost + m.shutdown_cost +
-                m.load_shedding_cost + m.reserve_penalty_cost)
+    def total_cost_rule(m, t):
+        return (m.total_cost[t] == m.production_cost[t] + m.startup_cost[t] + m.shutdown_cost[t] +
+                m.load_shedding_cost[t] + m.reserve_penalty_cost[t])
 
-    model.pc = pe.Constraint(rule=production_cost_rule)
-    model.suc = pe.Constraint(rule=startup_cost_rule)
-    model.sdc = pe.Constraint(rule=shutdown_cost_rule)
-    model.lsc = pe.Constraint(rule=load_shedding_cost_rule)
-    model.rpc = pe.Constraint(rule=reserve_penalty_cost_rule)
-    model.tc = pe.Constraint(rule=total_cost_rule)
+    model.pc = pe.Constraint(model.T_set, rule=production_cost_rule)
+    model.suc = pe.Constraint(model.T_set, rule=startup_cost_rule)
+    model.sdc = pe.Constraint(model.T_set, rule=shutdown_cost_rule)
+    model.lsc = pe.Constraint(model.T_set, rule=load_shedding_cost_rule)
+    model.rpc = pe.Constraint(model.T_set, rule=reserve_penalty_cost_rule)
+    model.tc = pe.Constraint(model.T_set, rule=total_cost_rule)
 
     # Network Constraints
     def balance_rule(m, t, n):
@@ -290,7 +296,7 @@ def init_model(args, data):
                 + m.s_pos[t, n] - m.s_neg[t, n] == m.demand[t, n])
 
     def power_flow_rule(m, t, l):
-        return m.f[t, l] == m.B[l] * (m.pi[t, m.from_bus[l]] - m.pi[t, m.to_bus[l]])
+        return m.f[t, l] == m.B[l] * (m.pi[t, line_from_bus[l]] - m.pi[t, line_to_bus[l]])
 
     def f_lb_rule(m, t, l):
         return m.F_min[l] <= m.f[t, l]
@@ -315,7 +321,7 @@ def init_model(args, data):
     model.pi_ub = pe.Constraint(model.T_set, model.buses, rule=pi_ub_rule)
     model.zero_first_pi = pe.Constraint(model.T_set, rule=zero_first_pi_rule)
 
-    model.obj = pe.Objective(expr=model.total_cost, sense=pe.minimize)
+    model.obj = pe.Objective(expr=sum(model.total_cost[t] for t in model.T_set), sense=pe.minimize)
     solver = pe.SolverFactory('gurobi')
     solver.options['NonConvex'] = 2
     solver.solve(model, tee=False)
@@ -360,9 +366,16 @@ if __name__ == "__main__":
         for n in range(1, 4):
             action['angle'][t, n] = model.pi[t, n].value
             action_arr[t-1, 9 + n] = model.pi[t, n].value
+    #     print(f"step {t}")
+    #     print(f"production cost: {model.production_cost[t].value}")
+    #     print(f"startup cost: {model.startup_cost[t].value}")
+    #     print(f"shutdown cost: {model.shutdown_cost[t].value}")
+    #     print(f"load shedding cost: {model.load_shedding_cost[t].value}")
+    #     print(f"reserve penalty cost: {model.reserve_penalty_cost[t].value}")
+    #     print(f"total cost: {model.total_cost[t].value}")
     # save action arr
-    #np.save('opt_action_v1_arr.npy', action_arr)
-    print(f"optimal cost v1: {model.total_cost.value}")
+    np.save('opt_action_v1_arr.npy', action_arr)
+    print(f"optimal cost v1: {model.obj()}")
 
     # states = []
     # for t in range(1, 25):
@@ -385,21 +398,21 @@ if __name__ == "__main__":
     #     print(f"p: {state['p']}")
     #     print(f"pi: {state['pi']}")
 
-    # args_instance = args(env_id='UC-v0')
-    # data = None  # Replace with actual data if needed
-    # model = init_model(args_instance, data)
-    #
-    # action = {'on_off': {}, 'power': {}, 'angle': {}}
-    # action_arr = np.zeros((24, 5+5))
-    # for t in range(1, 25):
-    #     for i in range(5):
-    #         action['on_off'][t, i] = model.u[t, i].value
-    #         action['power'][t, i] = model.p[t, i].value
-    #         action_arr[t-1, i] = model.u[t, i].value
-    #         action_arr[t-1, i + 5] = model.p[t, i].value
-    # # save action arr
-    # #np.save('opt_action_v0_arr.npy', action_arr)
-    # print(f"optimal cost v0: {model.total_cost.value}")
+    args_instance = args(env_id='UC-v0')
+    data = None  # Replace with actual data if needed
+    model = init_model(args_instance, data)
+
+    action = {'on_off': {}, 'power': {}, 'angle': {}}
+    action_arr = np.zeros((24, 5+5))
+    for t in range(1, 25):
+        for i in range(5):
+            action['on_off'][t, i] = model.u[t, i].value
+            action['power'][t, i] = model.p[t, i].value
+            action_arr[t-1, i] = model.u[t, i].value
+            action_arr[t-1, i + 5] = model.p[t, i].value
+    # save action arr
+    np.save('opt_action_v0_arr.npy', action_arr)
+    print(f"optimal cost v0: {model.obj()}")
 
 
 

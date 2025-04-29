@@ -653,7 +653,7 @@ class ForecastModel:
         # elif self.model_type == 'nyiso':
         #     return next(self.model)
 
-
+#
 # env = UnitCommitmentMasterEnv(env_id='UC-v0')
 # state = env.reset()
 # actions = np.load("./opt_action_v0_arr.npy")
@@ -662,21 +662,12 @@ class ForecastModel:
 #     state, reward, terminated, truncated, info = env.step(action)
 #     total += reward
 # print("Total Reward v0:", total)
-
-env = UnitCommitmentMasterEnv(env_id='UC-v1')
-state = env.reset()
-actions = np.load("./opt_action_v1_arr.npy")
-total = 0
-for t, action in enumerate(actions):
-    state, reward, terminated, truncated, info = env.step(action)
-    state_dict = env._get_state("dict")
-    print(f"step {t}")
-    print(f"cost: {env.cost}")
-
-    # tmp = {k: v[0] for k, v in state_dict['u_seq'].items()}
-    # print(f"u: {tmp}")
-    # print(f"D_forecast: {state_dict['D_forecast']}")
-    # print(f"p: {state_dict['p']}")
-    # print(f"pi: {state_dict['pi']}")
-    total += reward
-print("Total Reward v1:", total)
+#
+# env = UnitCommitmentMasterEnv(env_id='UC-v1')
+# state = env.reset()
+# actions = np.load("./opt_action_v1_arr.npy")
+# total = 0
+# for t, action in enumerate(actions):
+#     state, reward, terminated, truncated, info = env.step(action)
+#     total += reward
+# print("Total Reward v1:", total)
