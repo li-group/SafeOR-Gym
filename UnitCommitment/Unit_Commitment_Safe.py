@@ -106,6 +106,7 @@ class UnitCommitmentMasterEnvSafe(CMDP):
 #                 'T': 24,
 #                 'penalty_factor_UT': 99,
 #                 'penalty_factor_DT': 101,
+#                 'scale_action': True,
 #             }
 #         }
 #     }

@@ -284,7 +284,7 @@ if __name__ == '__main__':
     eg.add('train_cfgs:torch_threads', [1])
 
     # # env_config does not accept array, here I use the default config in env
-    # # specify the environment configurations.
+    eg.add('env_cfgs:env_init_config:scale_action', [True])
     # recurse(eg, env_config)
     # eg.add('model_cfgs:actor:output_activation', ['tanh']) todo: need to implement my custom activation function
     eg.add('algo_cfgs:steps_per_epoch', steps_per_epoch)

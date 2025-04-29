@@ -94,6 +94,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                  **kwargs: Any) -> None:
         super().__init__()
 
+        self._device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         self.env_id = env_id
 
         self.env_spec_log = {'Number of Minimum Up-time Violation': 0,
@@ -209,6 +210,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.R = 10
 
         # default initial values for physical state variables
+        self.scale_action = False
         self.no_change_before_0 = True
         self.u_seq = self.u0_seq = {0: np.ones(8 + 1),  # assume only 1st generator is on
                                     1: np.zeros(5 + 1),
@@ -233,12 +235,17 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         self.reset()
 
-        # todo: change the action bounds to -1 and 1
         if env_id == 'UC-v0':
-            self.raw_action_space = gym.spaces.Dict({
-                "on_off": gym.spaces.MultiBinary(self.num_gen),
-                "power": gym.spaces.Box(low=self.P_min, high=self.P_max, dtype=np.float32)
-            })
+            if self.scale_action:
+                self.raw_action_space = gym.spaces.Dict({
+                    "on_off": gym.spaces.MultiBinary(self.num_gen),
+                    "power": gym.spaces.Box(low=-1, high=1, shape=(self.num_gen,), dtype=np.float32)
+                })
+            else:
+                self.raw_action_space = gym.spaces.Dict({
+                    "on_off": gym.spaces.MultiBinary(self.num_gen),
+                    "power": gym.spaces.Box(low=self.P_min, high=self.P_max, dtype=np.float32)
+                })
             self.action_space = flatten_space(self.raw_action_space)
 
             self.raw_observation_space = gym.spaces.Dict(
@@ -250,11 +257,18 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.observation_space = flatten_space(self.raw_observation_space)
 
         elif env_id == 'UC-v1':
-            self.raw_action_space = gym.spaces.Dict({
-                "on_off": gym.spaces.MultiBinary(self.num_gen),
-                "power": gym.spaces.Box(low=self.P_min, high=self.P_max, dtype=np.float32),
-                "angle": gym.spaces.Box(low=self.Pi_min[1:], high=self.Pi_max[1:], dtype=np.float32)
-            })
+            if self.scale_action:
+                self.raw_action_space = gym.spaces.Dict({
+                    "on_off": gym.spaces.MultiBinary(self.num_gen),
+                    "power": gym.spaces.Box(low=-1, high=1, shape=(self.num_gen,), dtype=np.float32),
+                    "angle": gym.spaces.Box(low=-1, high=1, shape=(self.num_bus-1,), dtype=np.float32)
+                })
+            else:
+                self.raw_action_space = gym.spaces.Dict({
+                    "on_off": gym.spaces.MultiBinary(self.num_gen),
+                    "power": gym.spaces.Box(low=self.P_min, high=self.P_max, dtype=np.float32),
+                    "angle": gym.spaces.Box(low=self.Pi_min[1:], high=self.Pi_max[1:], dtype=np.float32)
+                })
             self.action_space = flatten_space(self.raw_action_space)
 
             self.raw_observation_space = gym.spaces.Dict(
@@ -267,6 +281,24 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.observation_space = flatten_space(self.raw_observation_space)
         else:
             raise ValueError(f"Unknown env_id: {env_id}")
+
+        action_low = {"on_off": [],
+                      "power": [],
+                      "angle": []}
+        action_high = {"on_off": [],
+                       "power": [],
+                       "angle": []}
+        for i in self.generators:
+            action_low["on_off"].append(0.)
+            action_high["on_off"].append(1.)
+            action_low["power"].append(self.P_min[i])
+            action_high["power"].append(self.P_max[i])
+        for n in self.buses:
+            action_low["angle"].append(self.Pi_min[n])
+            action_high["angle"].append(self.Pi_max[n])
+
+        self.action_low = action_low
+        self.action_high = action_high
 
     def _get_state(self, mode="arr") -> np.ndarray:
         if self.env_id == 'UC-v0':
@@ -549,20 +581,45 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.terminated = False
         return self.terminated
 
+    def _scale_and_round_action(self, on_off, power, angle):
+        if torch.is_tensor(action):
+            action_low = {key: torch.as_tensor(value, device=self._device) for key, value in self.action_low.items()}
+            action_high = {key: torch.as_tensor(value, device=self._device) for key, value in self.action_high.items()}
+        else:
+            action_low = {key: np.array(value) for key, value in self.action_low.items()}
+            action_high = {key: np.array(value) for key, value in self.action_high.items()}
+
+        on_off_rounded = on_off >= 0.5
+        power_scaled = (power + 1) / 2 * (action_high["power"] - action_low["power"]) + action_low["power"]
+        angle_scaled = (angle + 1) / 2 * (action_high["angle"] - action_low["angle"]) + action_low["angle"]
+        return on_off_rounded, power_scaled, angle_scaled
+
     def step(self, action):
-        action = action.numpy() if torch.is_tensor(action) else action
         if self.env_id == 'UC-v0':
             assert len(action) == 2 * self.num_gen  # on_off + power
             on_off = action[:self.num_gen]
             power = action[self.num_gen:]
-            angle = np.array([0])
+            if torch.is_tensor(action):
+                angle = torch.tensor([0], device=self._device)
+            else:
+                angle = np.array([0])
         elif self.env_id == 'UC-v1':
             assert len(action) == 2 * self.num_gen + self.num_bus - 1  # on_off + power + angle - 1 (exclude angle 1)
             on_off = action[:self.num_gen]
             power = action[self.num_gen:2 * self.num_gen]
-            angle = np.concatenate([np.zeros(1), action[2 * self.num_gen:]])
+            if torch.is_tensor(action):
+                angle = torch.concatenate([torch.zeros(1, device=self._device), action[2 * self.num_gen:]])
+            else:
+                angle = np.concatenate([np.zeros(1), action[2 * self.num_gen:]])
         else:
             raise NotImplementedError
+
+        if self.scale_action:
+            on_off, power, angle = self._scale_and_round_action(on_off, power, angle)
+
+        on_off = on_off.numpy() if torch.is_tensor(on_off) else on_off
+        power = power.numpy() if torch.is_tensor(power) else power
+        angle = angle.numpy() if torch.is_tensor(angle) else angle
         demand = self.D_forecast
         # now they are at the same time step, t+1
 
