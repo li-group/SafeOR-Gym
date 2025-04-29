@@ -227,10 +227,6 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         assign_env_config(self, kwargs)
 
-        # some attributes from information
-        self.min_demand = np.array([np.min(self.P_min[self.bus_gen[i]]) for i in self.buses])
-        self.max_demand = np.array([np.sum(self.P_max[self.bus_gen[i]]) for i in self.buses])
-
         # initialize belief model/data
         self.D_forecast = np.zeros(self.num_bus)
         self.forecast_model = ForecastModel(self.model_type, self.loc, self.scale, self.num_bus,
@@ -249,7 +245,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.raw_observation_space = gym.spaces.Dict(
                 {
                     "u_seq": gym.spaces.MultiBinary((np.maximum(self.UT, self.DT) + 1).sum()),
-                    "D_forecast": gym.spaces.Box(low=self.min_demand, high=self.max_demand, dtype=np.float32),
+                    "D_forecast": gym.spaces.Box(low=0, high=np.ones(self.num_bus) * self.P_max.sum(), dtype=np.float32),
                     "p": gym.spaces.Box(low=0, high=self.P_max, dtype=np.float32)
                 })
             self.observation_space = flatten_space(self.raw_observation_space)
@@ -265,7 +261,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.raw_observation_space = gym.spaces.Dict(
                 {
                     "u_seq": gym.spaces.MultiBinary((np.maximum(self.UT, self.DT) + 1).sum()),
-                    "D_forecast": gym.spaces.Box(low=self.min_demand, high=self.max_demand, dtype=np.float32),
+                    "D_forecast": gym.spaces.Box(low=0, high=np.ones(self.num_bus) * self.P_max.sum(), dtype=np.float32),
                     "p": gym.spaces.Box(low=0, high=self.P_max, dtype=np.float32),
                     "pi": gym.spaces.Box(low=self.Pi_min, high=self.Pi_max, dtype=np.float32)
                 })
@@ -276,7 +272,7 @@ class UnitCommitmentMasterEnv(gym.Env):
     def _get_state(self, mode="arr") -> np.ndarray:
         if self.env_id == 'UC-v0':
             obs_dict = {
-                "u": self.u_seq,
+                "u_seq": self.u_seq,
                 "D_forecast": self.D_forecast,
                 "p": self.p,
             }
@@ -285,7 +281,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                                       self.p])
         elif self.env_id == 'UC-v1':
             obs_dict = {
-                "u": self.u_seq,
+                "u_seq": self.u_seq,
                 "D_forecast": self.D_forecast,
                 "p": self.p,
                 "pi": self.pi
@@ -500,7 +496,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         return - self.C_RP * np.maximum(self.R - np.sum(reserve), 0)
 
     def _forecast_demand(self) -> np.ndarray:
-        demand = np.minimum(np.maximum(self.forecast_model.forecast(), self.min_demand), self.max_demand)
+        demand = self.forecast_model.forecast()
         return demand
 
     def _compute_reward(self, u_new, v_new, w_new, p_new, pi_new, demand) -> np.float32:
@@ -650,7 +646,7 @@ class ForecastModel:
     def forecast(self):
         if self.model_type == "deterministic":
             d = self.model[0]
-            self.model = np.roll(self.model, -1)
+            self.model = np.roll(self.model, shift=-1, axis=0)
             return d
         elif self.model_type == 'normal':
             return np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
@@ -660,10 +656,27 @@ class ForecastModel:
 
 # env = UnitCommitmentMasterEnv(env_id='UC-v0')
 # state = env.reset()
-# action_1 = np.array([1,1,0,0,1, 300, 300, 0, 0, 300])
-# state, reward, terminated, truncated, info = env.step(action_1)
-#
-# env = UnitCommitmentMasterEnv(env_id='UC-v1')
-# state = env.reset()
-# action_1 = np.array([1,1,0,0,1, 300, 300, 0, 0, 300, 0.1, 0.15, -0.1])
-# state, reward, terminated, truncated, info = env.step(action_1)
+# actions = np.load("./opt_action_v0_arr.npy")
+# total = 0
+# for action in actions:
+#     state, reward, terminated, truncated, info = env.step(action)
+#     total += reward
+# print("Total Reward v0:", total)
+
+env = UnitCommitmentMasterEnv(env_id='UC-v1')
+state = env.reset()
+actions = np.load("./opt_action_v1_arr.npy")
+total = 0
+for t, action in enumerate(actions):
+    state, reward, terminated, truncated, info = env.step(action)
+    state_dict = env._get_state("dict")
+    print(f"step {t}")
+    print(f"cost: {env.cost}")
+
+    # tmp = {k: v[0] for k, v in state_dict['u_seq'].items()}
+    # print(f"u: {tmp}")
+    # print(f"D_forecast: {state_dict['D_forecast']}")
+    # print(f"p: {state_dict['p']}")
+    # print(f"pi: {state_dict['pi']}")
+    total += reward
+print("Total Reward v1:", total)
