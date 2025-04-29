@@ -4,7 +4,6 @@ Akshdeep Singh Ahluwalia
 '''
 
 import random
-import json
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
 import torch
 import numpy as np
@@ -15,13 +14,116 @@ from gymnasium.spaces.utils import flatten_space
 from gymnasium import spaces        # https://gymnasium.farama.org/
 from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete, MultiBinary
 from gymnasium.utils import seeding
+import json
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 import os, sys
 from PIL import Image, ImageDraw, ImageFont
 import math
-             
+
+# --- Compressor Class ---
+class Compressor:
+    def __init__(self, comp_id, capacity, specific_energy, mttf, mttr, mntr, TLCM, TSLM, CDM):
+        self.comp_id = comp_id
+        self.capacity = capacity
+        self.specific_energy = specific_energy
+        self.mttf = mttf
+        self.mttr = mttr
+        self.mntr = mntr
+        self.TLCM = TLCM
+        self.TSLM = TSLM
+        self.CDM = CDM
+
+    def get_dict(self):
+        comp_dict = {
+            "comp_id": self.comp_id,
+            "capacity": self.capacity,
+            "specific_energy": self.specific_energy,
+            "mttf": self.mttf,
+            "mttr": self.mttr,
+            "mntr": self.mntr,
+            "TLCM": self.TLCM,
+            "TSLM": self.TSLM,
+            "CDM": self.CDM,
+            
+        }
+        return comp_dict
+
+    def info(self):
+        return (
+            f"Compressor {self.comp_id} → "
+            f"Capacity: {self.capacity} ton/day, "
+            f"Specific energy: {self.specific_energy} KWh/t, "
+            f"MTTF: {self.mttf} days, "
+            f"MTTR: {self.mttr} days, "
+            f"MNTR: {self.mntr} days "
+            f"TLCM: {self.TLCM} "
+            f"TSLM: {self.TSLM} "
+            f"CDM: {self.CDM} "
+        )
+    
+class Demand_simulator:
+    def __init__(self, duration, compressors, gamma=1):
+        self.seed = 42
+        np.random.seed(self.seed)
+        self.duration = duration
+        self.compressors = compressors
+        self.total_capacity = sum(comp.capacity for comp in compressors.values())
+        self.gamma = gamma
+        self.max_demand = self.gamma * self.total_capacity
+
+    def get_demand_array(self):
+        days = np.arange(self.duration)
+
+        # Seasonal effect: strong sine wave with 1 full cycle per 30 days
+        seasonal_effect = 0.6 + 0.4 * np.sin(2 * np.pi * days / 10)
+
+        # Step changes: every 30 days, simulate a change in base demand level
+        base_levels = np.random.uniform(0.6, 0.8, size=(self.duration // 30 + 1))
+        step_effect = np.repeat(base_levels, 30)[:self.duration]
+
+        # Random noise: small normally distributed fluctuations
+        noise = np.random.normal(0, 0.03, self.duration)
+
+        # Combine effects and scale to maximum allowed demand
+        demand = 1.2*(seasonal_effect * step_effect + noise) * self.max_demand
+
+        # Clip to [0, max_demand]
+        demand = np.clip(demand, 0, self.max_demand)
+        demand = demand + 300
+        self.demand_array = demand
+        return self.demand_array
+    
+class Electric_price_simulator:
+    def __init__(self, duration):
+        self.duration = duration
+        self.price_array = np.zeros(duration)  # $/kWh
+        self.seed = 42
+        np.random.seed(self.seed)
+
+    def get_price_array(self):
+        base_price = 0.0832           # average industrial price in the US in $/kWh
+        days = np.arange(self.duration)
+
+        # Weekly cycle: higher prices Mon-Fri, lower Sat-Sun
+        weekly_cycle = 1 + 0.015 * np.sin(2 * np.pi * days / 7)
+
+        # Seasonal trend: gradual increase
+        seasonal_trend = 1 + 0.0002 * days  # mild upward drift
+
+        # Random noise: ±0.005 around the trend
+        random_fluctuation = np.random.normal(0, 0.003, size=self.duration)
+
+        # Final price calculation
+        price = base_price * weekly_cycle * seasonal_trend + random_fluctuation
+
+        # Ensure non-negative prices
+        price = np.clip(price, 0, None)
+
+        self.price_array = price
+        return self.price_array  # $/kWh
+           
 # --- Plant Class ---
 class GASU(gym.Env):
 
@@ -45,16 +147,16 @@ class GASU(gym.Env):
             Num     Observation
             0       Demand
             1       Electricity price 
-            2       Time Left to Complete Maintenance (of each compressor) 
-            3       Time Since Last Maintenance (of each compressor) 
-            4       Can Do Maintenance (of each compressor) 
+            2       Time Left to Complete Maintenance 
+            3       Time Since Last Maintenance 
+            4       Can Do Maintenance 
 
         Action:
-            Type: Box(3 * n =(compressors))
+            Type: Box(3)
             Num     Action
-            0       Maintenance action (0 or 1)    : for each compressor
-            1       Production rate (0 to 1)       : for each compressor
-            2       External purchase (0 to 10000) : for each compressor
+            0       Maintenance action (0 or 1)
+            1       Production rate (0 to 1)
+            2       External purchase (0 to 10000)
 
         Reward:
             Type: float
@@ -98,18 +200,11 @@ class GASU(gym.Env):
             at the start of 31st day: we have data of 31st day itself and 29 coming days (total 30 days, making simulation days = 60)
             i.e., episode length (T) = 31 days (1-31)
         """
-        # Processing the input arguments
         self.env_id = env_id
-        
-        self.config_path = kwargs.get("config_path", None)
-        if self.config_path is None:
-            raise ValueError("config_path must be provided for MyEnv.")
-        self.config_data = self._load_config() 
-
         
         # First initialize the compressors
         self.compressors = {}
-        self.initialize_compressors()
+        self.initialize_compressors("compressors_config.json")
 
         # Initialize the environment
         self.action_horizon = action_horizon
@@ -132,8 +227,8 @@ class GASU(gym.Env):
         
         self.terminated = False
         self.truncated = False
-        self.reward_ep = 0
-        self.cost_ep = 0
+        self.reward = 0
+        self.cost = 0
 
         self.env_spec_log = {'Number of Maintenance-Duration Violation': 0,
                              'Penalty of Maintenance-Duration Violation': 0,
@@ -146,36 +241,26 @@ class GASU(gym.Env):
                              'Number of Demand-Unsatisfaction Violation': 0,
                              'Penalty of Demand-Unsatisfaction Violation': 0,
                             }
-        self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
 
-    def _load_config(self):
-        with open(self.config_path, 'r') as f:
-            return json.load(f)
-        
     def _initialize_simulation_data(self):
-        demand = self.config_data["demand"]
-        electricity_prices = self.config_data["electricity_prices"]
+        demand_simulator = Demand_simulator(self.simulation_days, self.compressors)
+        demand_array = demand_simulator.get_demand_array()
+        self.demand_array = demand_array
 
-        import numpy as np
-        self.demand_array = np.array(demand)
-        self.price_array = np.array(electricity_prices)
-
-        return self.demand_array, self.price_array
+        price_simulator = Electric_price_simulator(self.simulation_days)
+        price_array = price_simulator.get_price_array()
+        self.price_array = price_array
              
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         self.current_day = 0
+        # self._initialize_simulation_data()
         self._initialize_state()
-        self.reward_ep = 0
-        self.cost_ep = 0
-        self.terminated = False 
-        self.truncated = False
-        self.info = {}
+        self.done = False
+        self.terminated = False
+        self.reward = 0
+        self.info = {} 
         self.flatt_state = self.encode_observation(self.state)
-        flatt_state_tensor = th.tensor(self.flatt_state, device=self._device)
-
-        # OLD:  return self.flatt_state, {"dict_state": self.state, "terminated": self.terminated}
-        # ASHA: # return th.tensor(self.flatt_state).to(self._device), {"dict_state": self.state, "terminated": self.terminated, "truncated": self.truncated}
-        return flatt_state_tensor, {"dict_state": self.state, "terminated": self.terminated, "truncated": self.truncated}
+        return self.flatt_state, {"dict_state": self.state, "terminated": self.terminated}
 
     def _initialize_observation_space(self):
         self.max_mttr = max(comp.mttr for comp in self.compressors.values())
@@ -302,7 +387,8 @@ class GASU(gym.Env):
         self.update_compressor_physical_condition_state()
 
         # UPDATE STATE TO MATCH: Gym-compliant obs tensor for learning !!
-        # return self.state
+
+        return self.state
 
     def production_and_external_purchase_cost(self, action):
         cost = 0
@@ -492,17 +578,15 @@ class GASU(gym.Env):
         
         return flatt_state
 
-    def step(self, raw_action):
+    def step(self, action):
         truncated = False
 
-        action = raw_action.numpy() if torch.is_tensor(raw_action) else raw_action
-        
         # make sure the action is within the valid range
         action = np.clip(action, self.action_space.low, self.action_space.high)
         action_dict = self.decode_action(action)
         
         ## COST INCURRED AS PER THE PLANT CONFIGURATION and EXTERNAL PURCHASE
-        real_cost = self.production_and_external_purchase_cost(action_dict)
+        cost = self.production_and_external_purchase_cost(action_dict)
 
         ## PENALTY 1: TO LEARN THE MAINTENANCE DURATION
         penalty_LMD = self.maintenance_duration_penalty(action_dict)
@@ -519,13 +603,19 @@ class GASU(gym.Env):
         ## PENALTY 5: TO LEARN THE DEMAND SATISFACTION
         penalty_demand = self.demand_penalty(action_dict)
 
+        self.info[self.current_day+1] = {}
+        self.info[self.current_day+1]["cost"] = cost
+        # Log penalty presence as 1 (incurred) or 0 (not incurred)
+        self.info[self.current_day+1]["penalty_LMD"] = int(penalty_LMD > 0)
+        self.info[self.current_day+1]["penalty_MTTF"] = int(penalty_MTTF > 0)
+        self.info[self.current_day+1]["penalty_maint"] = int(penalty_maint > 0)
+        self.info[self.current_day+1]["penalty_ramp"] = int(penalty_ramp > 0)
+        self.info[self.current_day+1]["penalty_demand"] = int(penalty_demand > 0)
+        # USE self.logger for above.
+
         # Positive cost (penalties) incurred.
-        self.cost_ep += penalty_LMD + penalty_MTTF + penalty_maint + penalty_ramp + penalty_demand
-        cost = penalty_LMD + penalty_MTTF + penalty_maint + penalty_ramp + penalty_demand
-        
-        # Reward is negative of operational expense
-        self.reward_ep += -real_cost
-        reward = - real_cost
+        self.cost += penalty_LMD + penalty_MTTF + penalty_maint + penalty_ramp + penalty_demand
+        self.reward += -cost
         
         self.current_day += self.action_horizon      # 1 day
         self.sanitize_action(action_dict)            # To prevent state bound violations     
@@ -533,24 +623,11 @@ class GASU(gym.Env):
         self.update_compressor_physical_condition_state(action_dict)
 
         if self.current_day == self.T:       # one month (31 days)
-            self.terminated = True                 # end of episode
-    
-        # OLD
-        # return self.flatt_state, self.reward - self.cost, self.done, truncated, self.info
-
+            self.done = True                 # end of episode
+        
         self.flatt_state = self.encode_observation(self.state)
-        flatt_state_tensor = th.tensor(self.flatt_state, device=self._device)
-        return flatt_state_tensor, th.tensor(reward-cost, device=self._device), th.tensor(self.terminated, device=self._device), th.tensor(self.truncated, device=self._device), {}
 
-    def _get_state(self, mode):
-        if mode == 'dict':
-            return self.state
-        elif mode == 'flatt':
-            return self.flatt_state
-        elif mode == 'tensor':
-            return th.tensor(self.flatt_state, device=self._device)
-        else:
-            raise ValueError("Invalid mode. Choose from 'dict', 'flatt', or 'tensor'.")
+        return self.flatt_state, self.reward - self.cost, self.done, truncated, self.info
     
     @property
     def max_episode_steps(self) -> int:
@@ -558,8 +635,8 @@ class GASU(gym.Env):
 
     def render(self, mode='human'):
         print("state:", f"{self._get_state(mode='dict')}")
-        print("reward:", f"{self.reward_ep}")
-        print("cost", f"{self.cost_ep}")
+        print("reward:", f"{self.reward}")
+        print("cost:", f"{self.cost}")
         print("specification:", f"{self.env_spec_log}")
 
     def close(self) -> None:
@@ -591,19 +668,16 @@ class GASU(gym.Env):
         external_purchase_price = alpha*average_compressor_price
         self.external_purchase_price = external_purchase_price     # $/ton
         return self.external_purchase_price
-    
 
-    def initialize_compressors(self):
+    def initialize_compressors(self, json_path):
         try:
-            compressor_configs = self.config_data.get("compressors", [])
-            if not compressor_configs:
-                raise ValueError("No compressors found in config data.")
-            
+            with open(json_path, "r") as f:
+                config_data = json.load(f)
             self.compressors = {
-                cfg["comp_id"]: Compressor(**cfg) for cfg in compressor_configs
+                cfg["comp_id"]: Compressor(**cfg) for cfg in config_data
             }
         except Exception as e:
-            print(f"Error initializing compressors: {e}")
+            print(f"Error loading compressors: {e}")
 
     def compressor_info(self):
         comp_info_dict = {
@@ -642,47 +716,9 @@ class GASU(gym.Env):
         plt.tight_layout()
         plt.show()
 
-      
+    # def plot_state_information(self):
 
+        
+    
+    
 
-
-# --- Compressor Class ---
-class Compressor:
-    def __init__(self, comp_id, capacity, specific_energy, mttf, mttr, mntr, TLCM, TSLM, CDM):
-        self.comp_id = comp_id
-        self.capacity = capacity
-        self.specific_energy = specific_energy
-        self.mttf = mttf
-        self.mttr = mttr
-        self.mntr = mntr
-        self.TLCM = TLCM
-        self.TSLM = TSLM
-        self.CDM = CDM
-
-    def get_dict(self):
-        comp_dict = {
-            "comp_id": self.comp_id,
-            "capacity": self.capacity,
-            "specific_energy": self.specific_energy,
-            "mttf": self.mttf,
-            "mttr": self.mttr,
-            "mntr": self.mntr,
-            "TLCM": self.TLCM,
-            "TSLM": self.TSLM,
-            "CDM": self.CDM,
-            
-        }
-        return comp_dict
-
-    def info(self):
-        return (
-            f"Compressor {self.comp_id} → "
-            f"Capacity: {self.capacity} ton/day, "
-            f"Specific energy: {self.specific_energy} KWh/t, "
-            f"MTTF: {self.mttf} days, "
-            f"MTTR: {self.mttr} days, "
-            f"MNTR: {self.mntr} days "
-            f"TLCM: {self.TLCM} "
-            f"TSLM: {self.TSLM} "
-            f"CDM: {self.CDM} "
-        )

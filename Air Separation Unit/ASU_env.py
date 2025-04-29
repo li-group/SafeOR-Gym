@@ -5,7 +5,7 @@ Akshdeep Singh Ahluwalia
 
 import numpy as np
 import gymnasium as gym
-from gymnasium import spaces    # https://gymnasium.farama.org/
+from gymnasium import spaces        # https://gymnasium.farama.org/
 
 from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete
 from gymnasium.utils import seeding
@@ -24,7 +24,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(current_dir, 'asu_config.json')
 # Open the configuration file using the computed path
 with open(config_path, 'r') as config_file:
-    ASU_DATA_FILES = json.load(config_file)
+    ASUEnv_DATA_FILES = json.load(config_file)
 
 class ASUEnv(gym.Env):
 
@@ -56,22 +56,18 @@ class ASUEnv(gym.Env):
 
         super().__init__()
         self.name = env_id
-        
         lookahead = 4
         days_to_simulate = 7
-
 
         self.env_id = env_id
 
         # Simulation time counters
         self.current_hour = 0  # hour in current day (0-23)
-        self.current_day = 1
-        self.days_to_simulate = days_to_simulate
-
+        self.current_day = 0   # start of the first day (0-indexed) 
+        
         self.lookahead_days = lookahead
-        self.full_week_prices = np.zeros(24 * (1+self.lookahead_days), dtype=np.float32)
-        self.full_week_demand = np.zeros((3, 24 * (1+self.lookahead_days)), dtype=np.float32)
-
+        self.T = days_to_simulate
+        
         # Initialize parameters, state, observation and action spaces
         self._initialize_params()
         self._initialize_simulation_data()
@@ -93,12 +89,10 @@ class ASUEnv(gym.Env):
                         'Cost of Demand Violation': 0,
                         }
 
-
-
     def _initialize_simulation_data(self):
         # Electricity simulation
         data_simulation_days = 31
-        electricity_simulator = Get_electricity_dataframe(data_simulation_days + np.maximum(0, self.days_to_simulate - data_simulation_days), self.name)
+        electricity_simulator = Get_electricity_dataframe(data_simulation_days + np.maximum(0, self.T - data_simulation_days), self.name)
         price_df = electricity_simulator.simulate_electricity_prices()
         # electricity_simulator.get_electricity_plot()
         # Create new columns for the day and the hour (adding 1 to the hour so it goes from 1 to 24)
@@ -112,7 +106,7 @@ class ASUEnv(gym.Env):
         self.dict_prices = price_dict
 
         # Demand simulation
-        demand_simulator =  Get_demand_dataframe(data_simulation_days + np.maximum(0, self.days_to_simulate - data_simulation_days), self.name)
+        demand_simulator =  Get_demand_dataframe(data_simulation_days + np.maximum(0, self.T - data_simulation_days), self.name)
         demand_df = demand_simulator.simulate_daily_target_demand() 
         # demand_simulator.get_demand_plot()
         demand_dict = {i + 1: row.to_dict() for i, (date, row) in enumerate(demand_df.iterrows())}
@@ -121,9 +115,9 @@ class ASUEnv(gym.Env):
     def _initialize_params(self):
         """Load configuration and operational parameters."""
         
-        data_file = ASU_DATA_FILES.get(self.name)
+        data_file = ASUEnv_DATA_FILES.get(self.env_id)
         if data_file is None:
-            raise ValueError(f"Unknown ASU identifier: {self.name}")
+            raise ValueError(f"Unknown ASU identifier: {self.env_id}")
         with open(data_file, 'r') as file:
             self.loaded_data = json.load(file)
 
@@ -133,7 +127,7 @@ class ASUEnv(gym.Env):
         self.IV_l = self.loaded_data['IV_l']
         self.IV_f = self.loaded_data['IV_f']
         self.fixed_cost = self.loaded_data['fixed_cost'][0]
-        self.dynamic_cost = self.loaded_data['dynamic_cost'][0]
+        self.unit_prod_cost = self.loaded_data['dynamic_cost'][0]
         self.IV_i = self.loaded_data['IV_i']           # Initial inventory levels
         self.total_hours = self.loaded_data['total_hours'][0]
 
@@ -185,7 +179,7 @@ class ASUEnv(gym.Env):
         self.update_demand_and_electricty_state()
 
     def get_demand_and_el_states_for_the_day(self):
-        start_day = self.current_day
+        start_day = self.current_day + 1
         selected_days = range(start_day, start_day + self.lookahead_days + 1)
         
         product_demand = {}
@@ -225,11 +219,12 @@ class ASUEnv(gym.Env):
         
         # For each product and each forecast day, update only the end-of-day (24th hour).
         for idx, prod in enumerate(self.products):
-            for d in range(self.current_day, self.current_day + forecast_days):
+            for d in range(self.current_day+1, self.current_day+1 + forecast_days):
                 # Calculate the index for the end-of-day (24th hour) for day d.
                 # For the first day (d == current_day), the 24th hour is at index 23 (0-indexed).
                 # For subsequent days, it is (d - current_day + 1) * 24 - 1.
-                hour_index = (d - self.current_day + 1) * 24 - 1
+                # hour_index = (d - self.current_day + 1) * 24 - 1   # OLD
+                hour_index = (d - self.current_day) * 24 - 1
                 # Retrieve the demand value for product 'prod' on day d. Default to 0 if missing.
                 demand_value = product_demand.get(prod, {}).get(d, 0)
                 new_full_demand[idx, hour_index] = demand_value
@@ -280,14 +275,14 @@ class ASUEnv(gym.Env):
         Calculate production cost based on lambda_action.
         Returns the production vector (for each product) and production cost.
         Production vector is computed as the weighted sum of the convex hull extreme points.
-        The dynamic cost is the total production * self.dynamic_cost.
+        The dynamic cost is the total production * self.unit_prod_cost
         If production is active (sum(lambda) > 0), the fixed cost is added.
         """
         # Weighted production vector: dot product of lambda_action (shape: [n_extreme_points])
         # with extreme_points_liqp (shape: [n_extreme_points, 3]) => result shape: (3,)
         production_vector = np.dot(lambda_action, self.extreme_points_liqp)
         total_production = np.sum(production_vector)
-        dynamic_cost_total = total_production * self.dynamic_cost
+        dynamic_cost_total = total_production *  self.unit_prod_cost     #  self.dynamic_cost
         fixed_cost_total = self.fixed_cost if np.sum(lambda_action) > 0 else 0.0
         prod_cost = (dynamic_cost_total + fixed_cost_total) * self.state['electricity_prices'][0]  # Use the first hour's price for cost calculation
         return production_vector, prod_cost
@@ -372,7 +367,7 @@ class ASUEnv(gym.Env):
         total_cost = prod_cost + total_penalty
         reward = -total_cost
 
-        if self.current_day > self.days_to_simulate:
+        if self.current_day == self.T:
             self.done = True
 
         return self.state, reward, self.done, self.info
@@ -380,7 +375,7 @@ class ASUEnv(gym.Env):
     def reset(self):
         """Reset the environment to its initial state."""
         self.current_hour = 0
-        self.current_day = 1
+        self.current_day = 0
         self._initialize_state()
         self.done = False
         self.reward = 0
