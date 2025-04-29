@@ -9,7 +9,7 @@ import torch
 import numpy as np
 
 import scipy.stats as stats
-from or_gym.utils import assign_env_config
+from utils import assign_env_config
 # from or_gym.envs.power_system.forecast import get_random_25hr_forecast
 
 import gymnasium as gym
@@ -173,11 +173,11 @@ class UnitCommitmentMasterEnv(gym.Env):
         for line in self.lines:
             self.from_bus.append(self.line_bus[line][0])
             self.to_bus.append(self.line_bus[line][1])
-        self.from_bus_line = {i: [] for i in self.buses}
-        self.to_bus_line = {i: [] for i in self.buses}
+        self.from_bus_lines = {i: [] for i in self.buses}
+        self.to_bus_lines = {i: [] for i in self.buses}
         for line, (from_bus, to_bus) in self.line_bus.items():
-            self.from_bus_line[from_bus].append(line)
-            self.to_bus_line[to_bus].append(line)
+            self.from_bus_lines[from_bus].append(line)
+            self.to_bus_lines[to_bus].append(line)
 
         self.t = 0
         self.terminated = False
@@ -218,7 +218,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                                     4: np.zeros(1 + 1)}  # assume no change happened from - [max(UT, DT)+1] to 0
         # assume only 1st generator is on
         self.u_prev = self.u0_prev = np.array([1, 0, 0, 0, 0])
-        self.u = self.u0 = [1, 0, 0, 0, 0]
+        self.u = self.u0 = np.array([1, 0, 0, 0, 0])
         self.v, self.w = self._reckless_move(self.u, self.u_prev)
         self.v_seq, self.w_seq = self._u2vw_seq(self.u_seq)
 
@@ -226,10 +226,6 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.p = self.p0 = np.array([300, 0, 0, 0, 0])
 
         assign_env_config(self, kwargs)
-
-        # some attributes from information
-        self.min_demand = np.array([np.min(self.P_min[self.bus_gen[i]]) for i in self.buses])
-        self.max_demand = np.array([np.sum(self.P_max[self.bus_gen[i]]) for i in self.buses])
 
         # initialize belief model/data
         self.D_forecast = np.zeros(self.num_bus)
@@ -249,7 +245,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.raw_observation_space = gym.spaces.Dict(
                 {
                     "u_seq": gym.spaces.MultiBinary((np.maximum(self.UT, self.DT) + 1).sum()),
-                    "D_forecast": gym.spaces.Box(low=self.min_demand, high=self.max_demand, dtype=np.float32),
+                    "D_forecast": gym.spaces.Box(low=0, high=np.ones(self.num_bus) * self.P_max.sum(), dtype=np.float32),
                     "p": gym.spaces.Box(low=0, high=self.P_max, dtype=np.float32)
                 })
             self.observation_space = flatten_space(self.raw_observation_space)
@@ -265,7 +261,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.raw_observation_space = gym.spaces.Dict(
                 {
                     "u_seq": gym.spaces.MultiBinary((np.maximum(self.UT, self.DT) + 1).sum()),
-                    "D_forecast": gym.spaces.Box(low=self.min_demand, high=self.max_demand, dtype=np.float32),
+                    "D_forecast": gym.spaces.Box(low=0, high=np.ones(self.num_bus) * self.P_max.sum(), dtype=np.float32),
                     "p": gym.spaces.Box(low=0, high=self.P_max, dtype=np.float32),
                     "pi": gym.spaces.Box(low=self.Pi_min, high=self.Pi_max, dtype=np.float32)
                 })
@@ -276,7 +272,7 @@ class UnitCommitmentMasterEnv(gym.Env):
     def _get_state(self, mode="arr") -> np.ndarray:
         if self.env_id == 'UC-v0':
             obs_dict = {
-                "u": self.u_seq,
+                "u_seq": self.u_seq,
                 "D_forecast": self.D_forecast,
                 "p": self.p,
             }
@@ -285,7 +281,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                                       self.p])
         elif self.env_id == 'UC-v1':
             obs_dict = {
-                "u": self.u_seq,
+                "u_seq": self.u_seq,
                 "D_forecast": self.D_forecast,
                 "p": self.p,
                 "pi": self.pi
@@ -476,8 +472,8 @@ class UnitCommitmentMasterEnv(gym.Env):
         return repaired_flow
 
     def _compute_power_slack(self, p_new: np.ndarray, flow: np.ndarray, demand: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        flow_in = np.array([np.sum(flow[self.to_bus_line[b]]) for b in self.buses])
-        flow_out = np.array([np.sum(flow[self.from_bus_line[b]]) for b in self.buses])
+        flow_in = np.array([np.sum(flow[self.to_bus_lines[b]]) for b in self.buses])
+        flow_out = np.array([np.sum(flow[self.from_bus_lines[b]]) for b in self.buses])
         flow_diff = flow_in - flow_out
         s = demand - np.array([np.sum(p_new[self.bus_gen[b]]) for b in self.buses]) - flow_diff
         overflow = np.maximum(0, s)
@@ -500,7 +496,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         return - self.C_RP * np.maximum(self.R - np.sum(reserve), 0)
 
     def _forecast_demand(self) -> np.ndarray:
-        demand = np.minimum(np.maximum(self.forecast_model.forecast(), self.min_demand), self.max_demand)
+        demand = self.forecast_model.forecast()
         return demand
 
     def _compute_reward(self, u_new, v_new, w_new, p_new, pi_new, demand) -> np.float32:
@@ -650,20 +646,28 @@ class ForecastModel:
     def forecast(self):
         if self.model_type == "deterministic":
             d = self.model[0]
-            self.model = np.roll(self.model, -1)
+            self.model = np.roll(self.model, shift=-1, axis=0)
             return d
         elif self.model_type == 'normal':
             return np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
         # elif self.model_type == 'nyiso':
         #     return next(self.model)
 
-
+#
 # env = UnitCommitmentMasterEnv(env_id='UC-v0')
 # state = env.reset()
-# action_1 = np.array([1,1,0,0,1, 300, 300, 0, 0, 300])
-# state, reward, terminated, truncated, info = env.step(action_1)
+# actions = np.load("./opt_action_v0_arr.npy")
+# total = 0
+# for action in actions:
+#     state, reward, terminated, truncated, info = env.step(action)
+#     total += reward
+# print("Total Reward v0:", total)
 #
 # env = UnitCommitmentMasterEnv(env_id='UC-v1')
 # state = env.reset()
-# action_1 = np.array([1,1,0,0,1, 300, 300, 0, 0, 300, 0.1, 0.15, -0.1])
-# state, reward, terminated, truncated, info = env.step(action_1)
+# actions = np.load("./opt_action_v1_arr.npy")
+# total = 0
+# for t, action in enumerate(actions):
+#     state, reward, terminated, truncated, info = env.step(action)
+#     total += reward
+# print("Total Reward v1:", total)
