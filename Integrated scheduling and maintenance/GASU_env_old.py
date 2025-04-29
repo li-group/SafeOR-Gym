@@ -77,7 +77,7 @@ class Demand_simulator:
         days = np.arange(self.duration)
 
         # Seasonal effect: strong sine wave with 1 full cycle per 30 days
-        seasonal_effect = 0.6 + 0.4 * np.sin(2 * np.pi * days / 10)
+        seasonal_effect = 0.6 + 0.4 * np.sin(2 * np.pi * days / 35)
 
         # Step changes: every 30 days, simulate a change in base demand level
         base_levels = np.random.uniform(0.6, 0.8, size=(self.duration // 30 + 1))
@@ -250,6 +250,7 @@ class GASU(gym.Env):
         price_simulator = Electric_price_simulator(self.simulation_days)
         price_array = price_simulator.get_price_array()
         self.price_array = price_array
+        return self.demand_array, self.price_array
              
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         self.current_day = 0
