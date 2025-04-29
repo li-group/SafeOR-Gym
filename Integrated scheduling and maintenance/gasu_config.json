@@ -1,4 +1,5 @@
 {
     "electricity": "electricity_price_data.json",
-    "demand": "demand_data.json"
+    "demand": "demand_data.json",
+    "compressors": "compressors_data.json"
 }
