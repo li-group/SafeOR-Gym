@@ -635,7 +635,7 @@ class GASU(gym.Env):
         axes[1].axhline(y=self.total_capacity, color='g', linestyle='--', label='Maximum Capacity of the Plant')
         axes[1].set_title("Simulated Demand with Seasonal, Step, and Noise Effects")
         axes[1].set_xlabel("Day")
-        axes[1].set_ylabel("Demand (Nm³/h)")
+        axes[1].set_ylabel("Demand (ton/day)")
         axes[1].legend()
         axes[1].grid(True)
         # Adjust layout and show the combined plot
