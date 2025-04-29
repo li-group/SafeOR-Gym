@@ -9,7 +9,6 @@ import torch
 import numpy as np
 
 import scipy.stats as stats
-from utils import assign_env_config
 # from or_gym.envs.power_system.forecast import get_random_25hr_forecast
 
 import gymnasium as gym
@@ -652,6 +651,22 @@ class ForecastModel:
             return np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
         # elif self.model_type == 'nyiso':
         #     return next(self.model)
+
+
+def assign_env_config(self, kwargs):
+    for key, value in kwargs.items():
+        setattr(self, key, value)
+    if hasattr(self, 'env_config'):
+        for key, value in self.env_config.items():
+            # Check types based on default settings
+            if hasattr(self, key):
+                if type(getattr(self,key)) == np.ndarray:
+                    setattr(self, key, value)
+                else:
+                    setattr(self, key,
+                        type(getattr(self, key))(value))
+            else:
+                raise AttributeError(f"{self} has no attribute, {key}")
 
 #
 # env = UnitCommitmentMasterEnv(env_id='UC-v0')

@@ -2,22 +2,6 @@ import numpy as np
 import pyomo.environ as pe
 
 
-def assign_env_config(self, kwargs):
-    for key, value in kwargs.items():
-        setattr(self, key, value)
-    if hasattr(self, 'env_config'):
-        for key, value in self.env_config.items():
-            # Check types based on default settings
-            if hasattr(self, key):
-                if type(getattr(self,key)) == np.ndarray:
-                    setattr(self, key, value)
-                else:
-                    setattr(self, key,
-                        type(getattr(self, key))(value))
-            else:
-                raise AttributeError(f"{self} has no attribute, {key}")
-
-
 def init_model(args, data):
     num_gen = 5
     T = 24
@@ -322,97 +306,76 @@ def init_model(args, data):
     model.zero_first_pi = pe.Constraint(model.T_set, rule=zero_first_pi_rule)
 
     model.obj = pe.Objective(expr=sum(model.total_cost[t] for t in model.T_set), sense=pe.minimize)
-    solver = pe.SolverFactory('gurobi')
-    solver.options['NonConvex'] = 2
-    solver.solve(model, tee=False)
-    #
-    # actions = np.zeros((num_periods, num_gen))
-    # p = np.zeros((num_periods, num_gen))
-    # rewards = np.zeros(num_periods)
-    # for t in range(num_periods):
-    #     for i in range(num_gen):
-    #         actions[t, i] = model.u[t + 1, i + 1].value
-    #         p[t, i] = model.p[t + 1, i + 1].value
-    #
-    # for t in range(num_periods):
-    #     print(f"a{t}: {actions[t]}")
-    #     print(f"p{t + 1}: {p[t]}")
-    #     production_cost = sum(a[i] * (p[t, i] ** 2) + b[i] * p[t, i] + c[i] for i in range(num_gen))
-    #     startup_cost = sum(hot_cost[i] * model.v[t + 1, i + 1].value for i in range(num_gen))
-    #     relaxation_cost = C_LS * (model.s_pos[t + 1].value + model.s_neg[t + 1].value)
-    #     total_cost = production_cost + startup_cost + relaxation_cost
-    #     print(f"r{t + 1}: {total_cost}")
-
     return model
 
 
-class args:
-    def __init__(self, env_id):
-        self.env_id = env_id
-
-if __name__ == "__main__":
-    args_instance = args(env_id='UC-v1')
-    data = None  # Replace with actual data if needed
-    model = init_model(args_instance, data)
-
-    action = {'on_off': {}, 'power': {}, 'angle': {}}
-    action_arr = np.zeros((24, 5+5+3))
-    for t in range(1, 25):
-        for i in range(5):
-            action['on_off'][t, i] = model.u[t, i].value
-            action['power'][t, i] = model.p[t, i].value
-            action_arr[t-1, i] = model.u[t, i].value
-            action_arr[t-1, i + 5] = model.p[t, i].value
-        for n in range(1, 4):
-            action['angle'][t, n] = model.pi[t, n].value
-            action_arr[t-1, 9 + n] = model.pi[t, n].value
-    #     print(f"step {t}")
-    #     print(f"production cost: {model.production_cost[t].value}")
-    #     print(f"startup cost: {model.startup_cost[t].value}")
-    #     print(f"shutdown cost: {model.shutdown_cost[t].value}")
-    #     print(f"load shedding cost: {model.load_shedding_cost[t].value}")
-    #     print(f"reserve penalty cost: {model.reserve_penalty_cost[t].value}")
-    #     print(f"total cost: {model.total_cost[t].value}")
-    # save action arr
-    np.save('opt_action_v1_arr.npy', action_arr)
-    print(f"optimal cost v1: {model.obj()}")
-
-    # states = []
-    # for t in range(1, 25):
-    #     state = {"u_seq": {},
-    #              "D_forecast": {},
-    #              "p": {},
-    #              "pi": {}}
-    #     for i in range(5):
-    #         state["u_seq"][i] = model.u[t, i].value
-    #         state["p"][i] = model.p[t, i].value
-    #     for n in range(4):
-    #         state["D_forecast"][n] = model.demand[t, n].value
-    #         state["pi"][n] = model.pi[t, n].value
-    #     states.append(state)
-    # for t in range(24):
-    #     state = states[t]
-    #     print(f"step {t}")
-    #     print(f"u: {state['u_seq']}")
-    #     print(f"D_forecast: {state['D_forecast']}")
-    #     print(f"p: {state['p']}")
-    #     print(f"pi: {state['pi']}")
-
-    args_instance = args(env_id='UC-v0')
-    data = None  # Replace with actual data if needed
-    model = init_model(args_instance, data)
-
-    action = {'on_off': {}, 'power': {}, 'angle': {}}
-    action_arr = np.zeros((24, 5+5))
-    for t in range(1, 25):
-        for i in range(5):
-            action['on_off'][t, i] = model.u[t, i].value
-            action['power'][t, i] = model.p[t, i].value
-            action_arr[t-1, i] = model.u[t, i].value
-            action_arr[t-1, i + 5] = model.p[t, i].value
-    # save action arr
-    np.save('opt_action_v0_arr.npy', action_arr)
-    print(f"optimal cost v0: {model.obj()}")
+# class args:
+#     def __init__(self, env_id):
+#         self.env_id = env_id
+#
+# if __name__ == "__main__":
+#     args_instance = args(env_id='UC-v1')
+#     data = None  # Replace with actual data if needed
+#     model = init_model(args_instance, data)
+#
+#     action = {'on_off': {}, 'power': {}, 'angle': {}}
+#     action_arr = np.zeros((24, 5+5+3))
+#     for t in range(1, 25):
+#         for i in range(5):
+#             action['on_off'][t, i] = model.u[t, i].value
+#             action['power'][t, i] = model.p[t, i].value
+#             action_arr[t-1, i] = model.u[t, i].value
+#             action_arr[t-1, i + 5] = model.p[t, i].value
+#         for n in range(1, 4):
+#             action['angle'][t, n] = model.pi[t, n].value
+#             action_arr[t-1, 9 + n] = model.pi[t, n].value
+#     #     print(f"step {t}")
+#     #     print(f"production cost: {model.production_cost[t].value}")
+#     #     print(f"startup cost: {model.startup_cost[t].value}")
+#     #     print(f"shutdown cost: {model.shutdown_cost[t].value}")
+#     #     print(f"load shedding cost: {model.load_shedding_cost[t].value}")
+#     #     print(f"reserve penalty cost: {model.reserve_penalty_cost[t].value}")
+#     #     print(f"total cost: {model.total_cost[t].value}")
+#     # save action arr
+#     np.save('opt_action_v1_arr.npy', action_arr)
+#     print(f"optimal cost v1: {model.obj()}")
+#
+#     # states = []
+#     # for t in range(1, 25):
+#     #     state = {"u_seq": {},
+#     #              "D_forecast": {},
+#     #              "p": {},
+#     #              "pi": {}}
+#     #     for i in range(5):
+#     #         state["u_seq"][i] = model.u[t, i].value
+#     #         state["p"][i] = model.p[t, i].value
+#     #     for n in range(4):
+#     #         state["D_forecast"][n] = model.demand[t, n].value
+#     #         state["pi"][n] = model.pi[t, n].value
+#     #     states.append(state)
+#     # for t in range(24):
+#     #     state = states[t]
+#     #     print(f"step {t}")
+#     #     print(f"u: {state['u_seq']}")
+#     #     print(f"D_forecast: {state['D_forecast']}")
+#     #     print(f"p: {state['p']}")
+#     #     print(f"pi: {state['pi']}")
+#
+#     args_instance = args(env_id='UC-v0')
+#     data = None  # Replace with actual data if needed
+#     model = init_model(args_instance, data)
+#
+#     action = {'on_off': {}, 'power': {}, 'angle': {}}
+#     action_arr = np.zeros((24, 5+5))
+#     for t in range(1, 25):
+#         for i in range(5):
+#             action['on_off'][t, i] = model.u[t, i].value
+#             action['power'][t, i] = model.p[t, i].value
+#             action_arr[t-1, i] = model.u[t, i].value
+#             action_arr[t-1, i + 5] = model.p[t, i].value
+#     # save action arr
+#     np.save('opt_action_v0_arr.npy', action_arr)
+#     print(f"optimal cost v0: {model.obj()}")
 
 
 
