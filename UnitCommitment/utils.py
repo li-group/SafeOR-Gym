@@ -72,21 +72,21 @@ def init_model(args, data):
 
     P_max = np.array([455, 130, 130, 80, 55])
     P_min = np.array([150, 20, 20, 20, 55])
-    a = np.array([0.00048, 0.00200, 0.00211, 0.00712, 0.00413])
-    b = np.array([16.19, 16.60, 16.50, 22.26, 25.92])
-    c = np.array([1000, 700, 680, 370, 660])
+    a = np.array([0.00048, 0.00200, 0.00211, 0.00712, 0.00413]) * 0.1
+    b = np.array([16.19, 16.60, 16.50, 22.26, 25.92]) * 0.1
+    c = np.array([1000, 700, 680, 370, 660]) * 0.1
     UT = np.array([8, 5, 5, 3, 1])
     DT = np.array([8, 5, 5, 3, 1])
     RU = np.array([300, 85, 85, 55, 55])
     RD = np.array([300, 85, 85, 55, 55])
     SU = np.array([300, 85, 85, 55, 55])
     SD = np.array([300, 85, 85, 55, 55])
-    hot_cost = np.array([4500, 550, 560, 170, 30])
-    cold_cost = np.array([9000, 1100, 1120, 340, 60])
+    hot_cost = np.array([4500, 550, 560, 170, 30]) * 0.1
+    cold_cost = np.array([9000, 1100, 1120, 340, 60]) * 0.1
     cold_hrs = np.array([5, 4, 4, 2, 0])
-    C_SD = np.array([0, 0, 0, 0, 0])
-    C_LS = 10000
-    C_RP = 100
+    C_SD = np.array([0, 0, 0, 0, 0]) * 0.1
+    C_LS = 10000 * 0.1
+    C_RP = 100 * 0.1
     R = 10
 
     u0_seq = {0: np.ones(8 + 1),  # assume only 1st generator is on
