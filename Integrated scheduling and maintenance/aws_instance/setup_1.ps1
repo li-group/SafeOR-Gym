@@ -27,4 +27,3 @@ ssh -i "./akshdeep_safe.pem" $remoteIP
 # scp -i "./Asha_5.pem" -r "${remoteIP}:/home/ec2-user/exp-x" C:\Users\aramanuj\omnisafe_results_1
 # scp -i "./Asha_5.pem" -r "${remoteIP}:/home/ec2-user/algo---Capacity-Expansion---8f1f87fd458dda8e491cc24b0e6f0317670b701326f94010341b5638daf050a6.png" C:\Users\aramanuj\omnisafe_results_1
 # # --- powershell ---
-
