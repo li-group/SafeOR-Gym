@@ -46,10 +46,10 @@ def main(args, env_id):
         }
     })
     
-    env = SafeSTN('stn-v0', **custom_cfgs)
-    env.reset(seed=0)
+    #env = SafeSTN('stn-v0', **custom_cfgs)
+    #env.reset(seed=0)
 
-    while True:
+    while False:
         action = env.action_space.sample()
         action = torch.from_numpy(action)
         obs, reward, cost, terminated, truncated, info = env.step(action)
@@ -65,13 +65,13 @@ def main(args, env_id):
         print('*' * 20)
         if terminated or truncated:
             break
-    env.close()
+    #env.close()
 
     # agent = Agent(ALGO, 'stn-v0', custom_cfgs = custom_cfgs)  # pass empty custom_cfgs
     # agent.learn()
 
 
-    eg = ExperimentGrid(exp_name = 'Benchmark_Safety_rtn_v0')
+    eg = ExperimentGrid(exp_name = 'Benchmark_Safety_stn_v0')
 
     base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
     naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
@@ -100,18 +100,19 @@ def main(args, env_id):
 
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
-    eg.add('train_cfgs:device', ['cpu'])
-    eg.add('train_cfgs:total_steps', [100])
+    eg.add('train_cfgs:device', ['cuda:0'])
+    eg.add('train_cfgs:total_steps', [100000])
     
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
 
-    eg.add('algo_cfgs:steps_per_epoch', [20])
+    eg.add('algo_cfgs:steps_per_epoch', [100])
     eg.add('env_cfgs:env_init_config:config_file', [args.env_config])
     eg.add('env_cfgs:env_init_config:debug', [False])
+    eg.add('env_cfgs:env_init_config:sanitization_cost_weight', [1.0])
 
-    eg.run(train, num_pool=1, gpu_id=gpu_id)
-    eg.analyze(parameter='algo', values=None, compare_num=12)
-    a = eg.evaluate(num_episodes=10)
+    eg.run(train, num_pool = 1, gpu_id = gpu_id)
+    eg.analyze(parameter = 'algo', values=None, compare_num = 1)
+    a = eg.evaluate(num_episodes = 1)
 
 
 if __name__ == '__main__':
