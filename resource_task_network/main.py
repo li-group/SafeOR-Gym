@@ -47,10 +47,10 @@ def main(args, env_id):
         }    
     })
     
-    env = SafeRTN('rtn-v0', **custom_cfgs)
-    env.reset(seed=0)
+    # env = SafeRTN('rtn-v0', **custom_cfgs)
+    # env.reset(seed=0)
 
-    while True:
+    while False:
         action = env.action_space.sample()
         action = torch.from_numpy(action)
         obs, reward, cost, terminated, truncated, info = env.step(action)
@@ -66,7 +66,7 @@ def main(args, env_id):
         print('*' * 20)
         if terminated or truncated:
             break
-    env.close()
+    # env.close()
 
     #agent = Agent(ALGO, 'rtn-v0', custom_cfgs = custom_cfgs)  # pass empty custom_cfgs
     #agent.learn()
@@ -101,18 +101,20 @@ def main(args, env_id):
 
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
-    eg.add('train_cfgs:device', ['cpu'])
-    eg.add('train_cfgs:total_steps', [100])
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    eg.add('train_cfgs:device', [device])
+    eg.add('train_cfgs:total_steps', [1000000])
     
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
 
-    eg.add('algo_cfgs:steps_per_epoch', [20])
+    eg.add('algo_cfgs:steps_per_epoch', [100])
     eg.add('env_cfgs:env_init_config:config_file', [args.env_config])
     eg.add('env_cfgs:env_init_config:debug', [args.debug])
+    eg.add('env_cfgs:env_init_config:sanitization_cost_weight', [1.0])
 
     eg.run(train, num_pool = 1, gpu_id=gpu_id)
     eg.analyze(parameter='algo', values = None, compare_num = 1)
-    a = eg.evaluate(num_episodes = 10)
+    a = eg.evaluate(num_episodes = 1)
 
 
 if __name__ == '__main__':

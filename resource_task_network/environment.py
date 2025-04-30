@@ -400,18 +400,21 @@ class RTNEnv(gym.Env):
             - violated_or_not (bool)
         """
         
-        if np.any(new_inventory < self.lower_bounds) or np.any(new_inventory > self.upper_bounds):
-            violated = [(self.resources[i], new_inventory[i], self.lower_bounds[i], self.upper_bounds[i]) for i in range(len(self.resources)) if new_inventory[i] < self.lower_bounds[i] or new_inventory[i] > self.upper_bounds[i]]
+        violated = []
+
+        for i, res in enumerate(self.resources):
+            if res in self.reactants:
+                continue
+            if new_inventory[i] < self.lower_bounds[i] or new_inventory[i] > self.upper_bounds[i]:
+                violated.append((res, new_inventory[i], self.lower_bounds[i], self.upper_bounds[i]))
+
+        if violated:
+            for res, inv, lb, ub in violated:
+                self.logger.debug(f'---- {res} : {val:.3f} (bounds: {lb:.3f}–{ub:.3f}) ----')
             
-            self.logger.debug(f'---- Inventory bounds violated at ----')
-            for res, val, lb, ub in violated:
-                self.logger.debug(f"---- {res}: {val:.3f} (bounds: {lb:.3f}–{ub:.3f}) ----")
-            
-            self.env_spec_log["Penalties/inv_ub"] += 1
-            return False
-        
+                self.env_spec_log['Penalties/inv_ub'] += 1
+                return False
         return True
-    
 
     def _fix_inventory(self, new_inventory: np.ndarray) -> np.ndarray:
         """
@@ -498,13 +501,12 @@ class RTNEnv(gym.Env):
             - cost (float): number of violated constraints
         """
         cost = 0.0
-
-        # Inventory bound violations
-        below_lb = inventory < self.lower_bounds
-        above_ub = inventory > self.upper_bounds
-        cost += np.sum(below_lb) + np.sum(above_ub)
-
-        return cost #float(cost)
+        for i, res in enumerate(self.resources):
+            if res in self.reactants:
+                continue  
+            if inventory[i] < self.lower_bounds[i] or inventory[i] > self.upper_bounds[i]:
+                cost += 1.0
+        return cost
 
     def _compute_utility_cost(self, action: np.ndarray) -> float:
         """
@@ -579,9 +581,20 @@ class RTNEnv(gym.Env):
 
         # Unmet demand = total demand - fulfilled amount
         unmet_demand = current_demand - np.minimum(current_demand, available_to_fulfill)
-        unmet_penalty = sum(1.5 * unmet_demand[i] * product_price.get(prod) for i, prod in enumerate(self.products))
+        unmet_penalty = sum(1.5 * unmet_demand[i] * product_price.get(prod) for i, prod in enumerate(self.products)) # 1.5 is a tunable penalty coefficient
 
-        reward = revenue - utility_cost - unmet_penalty  # 1.5 is a tunable penalty coefficient
+        reward = revenue - utility_cost - unmet_penalty  
+        
+        reactant_penalty = 0.0
+        for idx, r in enumerate(self.reactants):
+            inv_idx = self.resources.index(r)
+            deficit = -min(new_inventory[inv_idx], 0.0)  # Only if below zero
+            if deficit > 0:
+                price = self.raws_dict[r]['cost']  # Cost of buying that reactant
+                reactant_penalty += deficit * price
+
+        self.logger.debug(f"---- Reactant penalty: {reactant_penalty:.3f} ----")
+        reward -= reactant_penalty
 
         return reward
 
@@ -648,17 +661,6 @@ class RTNEnv(gym.Env):
                     # ensure list exists
                     self.delayed_production_queue.setdefault(delivery_time, [])
                     self.delayed_production_queue[delivery_time].append((res, coeff * batch))
-
-        
-        # Increase equipment units if task is getting finished at this time step
-        
-        # if 'equipment_returns' in self.delayed_production_queue:
-        #     if self.t in self.delayed_production_queue['equipment_returns']:
-        #         # If there are some units going to be free at the next time step
-        #         for eq, amount in self.delayed_production_queue['equipment_returns'][self.t]:
-        #             eq_idx = self.resources.index(eq)
-        #             new_inventory[eq_idx] += amount
-        #         del self.delayed_production_queue['equipment_returns'][self.t]       
 
         return new_inventory
     
@@ -799,23 +801,6 @@ class RTNEnv(gym.Env):
                     
                     self.delayed_production_queue.setdefault(ret_time, [])
                     self.delayed_production_queue[ret_time].append((eq, 1.0))
-
-            # for i in range(self.num_tasks):
-            #     tau = self.task_taus[i]
-                
-            #     if not sanitized_action[i]:
-            #         continue
-            #     for eq in self.task_equipments[i]:
-            #         eq_idx = self.resources.index(eq)
-            #         new_inventory[eq_idx] -= 1
-
-                    # Schedule the return at t + tau.
-                    # if 'equipment_returns' not in self.delayed_production_queue:
-                    #     self.delayed_production_queue['equipment_returns'] = {}
-                    
-                    # if self.t + tau not in self.delayed_production_queue['equipment_returns']:
-                    #     self.delayed_production_queue['equipment_returns'][self.t + tau] = []
-                    # self.delayed_production_queue['equipment_returns'][self.t + tau].append((eq, 1.0))
             
             # State most likely to be feasible
             self.cost = 0.0
