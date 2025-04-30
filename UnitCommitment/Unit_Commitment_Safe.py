@@ -3,7 +3,7 @@ Unit Commitment
 Hao Chen
 '''
 import random
-from typing import Any, ClassVar, List, Tuple, Optional, Dict
+from typing import Any, ClassVar, List, Tuple, Optional, Dict, Union
 
 import torch
 import numpy as np
@@ -34,7 +34,7 @@ class UnitCommitmentMasterEnvSafe(CMDP):
         # Specify the observation space for initialization by the algorithm layer
         self._observation_space = self._env.observation_space
 
-    def reset(self, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[torch.Tensor, dict[str, Any]]:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[torch.Tensor, dict[str, Any]]:
         # Reset the environment
         obs, info = self._env.reset(seed=seed, options=options)
         # Convert the reset observations to a torch tensor.
@@ -61,7 +61,7 @@ class UnitCommitmentMasterEnvSafe(CMDP):
         return obs, reward, cost, terminated, truncated, {}
 
     @property
-    def max_episode_steps(self) -> int | None:
+    def max_episode_steps(self) -> Optional[int]:
         # Return the maximum number of interaction steps per episode in the environment
         return self._env.T
 

@@ -236,16 +236,16 @@ def recurse(eg, current, path=[], ):
 if __name__ == '__main__':
     debug_use = True
 
-    eg = ExperimentGrid(exp_name='Benchmark_UC1')
+    eg = ExperimentGrid(exp_name='Benchmark_UC2')
 
     if debug_use == True:
         base_policy = []
         naive_lagrange_policy = []
-        first_order_policy = ['CUP']
+        first_order_policy = []
         second_order_policy = ['CPO']
-        steps_per_epoch = [24]
-        total_steps = [48]
-        num_episodes = 3
+        steps_per_epoch = [24*100]
+        total_steps = [24*100*1000]
+        num_episodes = 10
 
     else:
         base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
@@ -285,6 +285,12 @@ if __name__ == '__main__':
 
     # # env_config does not accept array, here I use the default config in env
     eg.add('env_cfgs:env_init_config:scale_action', [True])
+    eg.add('env_cfgs:env_init_config:penalty_factor_UT', [10])
+    eg.add('env_cfgs:env_init_config:penalty_factor_DT', [10])
+    eg.add('env_cfgs:env_init_config:penalty_factor_RampUp', [10])
+    eg.add('env_cfgs:env_init_config:penalty_factor_RampDown', [10])
+    eg.add('env_cfgs:env_init_config:penalty_factor_irreparable', [1000])
+
     # recurse(eg, env_config)
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
     eg.add('algo_cfgs:steps_per_epoch', steps_per_epoch)

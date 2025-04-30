@@ -62,7 +62,37 @@ class RTNEnv(gym.Env):
         - When the horizon ends. It is not truncated even under constraint violations.
 
     The following functions are included:
-        = init : to initialize all the configuration parameters:
+        - init : to initialize all the configuration parameters:
+        - reset : resets the timestep to 0 and all the inventory to the initial inventory
+        - step : changes the state based on the action given by the agent
+        - get_state : gets the current state based on the inventory + incoming products + future demand
+        - get_padded_future_demand : post pads the demand with 0 to keep a consistent state shape 
+        - sanitize_action : sanitizes the action to ensure inventory and equipment lower bounds are not violated (adds a cost to the RL agent in that case)
+        - check_inventory_bounds : checks for any inventory constraints violations
+        - fix_inventory : fixes the inventory incase it overflows due to actions (tasks) that have been already executed. Assigns
+        - cost to the agent in that case
+        - compute_resource_change : computes the change (comsumption) of the reactants to the task
+        - compute_cost : computes the constraint violations
+        - compute_utility_cost : computes the cost of the utilities
+        - compute_reward : computes the reward for that action
+        - compute_sanitization_cost :  computes the cost of sanitizing the action (a larger degree of sanitization implies a higher cost)
+        - compute_product_change : computes the delivery of products at that time step due to previous action (task) execution
+
+            
+    """
+        
+
+    _support_envs: ClassVar[List[str]] = ['rtn-v0']
+    _action_space: OmnisafeSpace
+    _observation_space: OmnisafeSpace
+    need_auto_reset_wrapper = True
+    need_time_limit_wrapper = True
+    _num_envs = 1
+
+    def __init__(self, env_id: str, **kwargs: Any) -> None:
+        #super(RTNEnv, self).__init__(env_id, **kwargs)
+        """
+        Function to initialise all the environment parameters:
             - T : horizon
             - reactants : materials used at the start
                 - X0 : initial amount of inventory present
@@ -94,36 +124,6 @@ class RTNEnv(gym.Env):
             
             - demand : demand of each product across the horizon
 
-        - reset : resets the timestep to 0 and all the inventory to the initial inventory
-        - step : changes the state based on the action given by the agent
-        - get_state : gets the current state based on the inventory + incoming products + future demand
-        - get_padded_future_demand : post pads the demand with 0 to keep a consistent state shape 
-        - sanitize_action : sanitizes the action to ensure inventory and equipment lower bounds are not violated (adds a cost to the RL agent in that case)
-        - check_inventory_bounds : checks for any inventory constraints violations
-        - fix_inventory : fixes the inventory incase it overflows due to actions (tasks) that have been already executed. Assigns
-        a cost to the agent in that case
-        - compute_resource_change : computes the change (comsumption) of the reactants to the task
-        - compute_cost : computes the constraint violations
-        - compute_utility_cost : computes the cost of the utilities
-        - compute_reward : computes the reward for that action
-        - compute_sanitization_cost :  computes the cost of sanitizing the action (a larger degree of sanitization implies a higher cost)
-        - compute_product_change : computes the delivery of products at that time step due to previous action (task) execution
-
-            
-    """
-        
-
-    _support_envs: ClassVar[List[str]] = ['rtn-v0']
-    _action_space: OmnisafeSpace
-    _observation_space: OmnisafeSpace
-    need_auto_reset_wrapper = True
-    need_time_limit_wrapper = True
-    _num_envs = 1
-
-    def __init__(self, env_id: str, **kwargs: Any) -> None:
-        #super(RTNEnv, self).__init__(env_id, **kwargs)
-        """
-        Function to initialise all the environment parameters
 
         Inputs:
             - env_id : str
@@ -134,11 +134,9 @@ class RTNEnv(gym.Env):
         """
 
         # Set up debug flag and logger.
-        self.config_file = kwargs.get('config_file')
-        print(kwargs)
-        
+        self.config_file = kwargs.get('config_file')        
         self.debug = kwargs.get('debug', False)
-        self.sanitization_cost_weight = 1e1
+        self.sanitization_cost_weight = kwargs.get('sanitization_cost_weight')
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.env_spec_log = {"Penalties/inv_lb" : 0, "Penalties/inv_ub" : 0, "Penalties/equip_lb" : 0}
         
@@ -587,109 +585,6 @@ class RTNEnv(gym.Env):
 
         return reward
 
-    # def _transition(self, action) -> Tuple[np.ndarray, float, float, bool, bool]:
-    #     """
-    #     UNUSED AT THIS MOMENT
-    #     Transition function that updates the state based on the action 
-    #         - Computes inventory change for all resources (materials : _compute_resource_change)
-    #         - Computes equipment unit change for all equipments ()
-
-    #     Inputs:
-    #         - (sanitized) action (ndarray)
-    #     Outputs:
-    #         - new state, reward, cost (feasibility checks), truncated (bool), terminated (bool) (ndarray)
-    
-    #     """
-    #     # Start with the current inventory
-    #     new_inventory = self.inventory
-
-    #     # Handle delayed product deliveries (including any returns that are scheduled for t).
-    #     if self.t in self.delayed_production_queue:
-    #         # There are some products at the next time step coming in
-    #         for res, amount in self.delayed_production_queue[self.t]:
-    #             # Add the incoming amount for every product id
-    #             res_idx = self.resources.index(res)
-    #             new_inventory[res_idx] += amount
-            
-    #         # Remove the product delivery at time t to ensure multiple products aren't added
-    #         del self.delayed_production_queue[self.t]
-        
-    #     # Increase equipment units if task is getting finished at this time step
-    #     if 'equipment_returns' in self.delayed_production_queue:
-    #         if self.t in self.delayed_production_queue['equipment_returns']:
-    #             # If there are some units going to be free at the next time step
-    #             for eq, amount in self.delayed_production_queue['equipment_returns'][self.t]:
-    #                 eq_idx = self.resources.index(eq)
-    #                 new_inventory[eq_idx] += amount
-    #             del self.delayed_production_queue['equipment_returns'][self.t]
-
-    #     # Schedule production of products in a buffer
-    #     for i in range(self.num_tasks):
-    #         tau = self.task_taus[i]
-    #         batch = action[i]
-    #         task_stoich = self.task_stoichs[i]
-            
-    #         for res, coeff in task_stoich.items():
-    #             # Products get added to production queue
-    #             if coeff > 0:  
-    #                 delivery_time = self.t + tau
-    #                 # Check if other tasks ending at that time
-    #                 if delivery_time not in self.delayed_production_queue:
-    #                     self.delayed_production_queue[delivery_time] = []
-                    
-    #                 self.delayed_production_queue[delivery_time].append((res, coeff * batch))
-
-    #     # Calculate change of each resource
-    #     resource_change = self._compute_resource_change(action)
-    #     # Update inventory
-    #     new_inventory += resource_change
-
-    #     # Feasibility checks.
-    #     #equip_ok = self._check_equipment_constraints(action)
-    #     # Important as production from buffer might cause inv surplus
-    #     inv_ok = self._check_inventory_bounds(new_inventory)
-    #     #demand_ok = self._check_demand_satisfaction(new_inventory)
-    #     feasible = inv_ok #and demand_ok
-
-    #     if not feasible:
-    #         cost = self._compute_cost(self.inventory)
-    #         reward = self._compute_reward(self.inventory, action)  # Heavy penalty.
-    #         truncated = False
-    #         new_inventory = self._fix_inventory(new_inventory) # Bound the inventories between lower and upper bounds.
-    #     else:
-    #         # For each executed task, update equipment consumption.
-    #         for i in range(self.num_tasks):
-    #             tau = self.task_taus[i]
-                
-    #             if not action[i]:
-    #                 continue
-    #             # For every equipment required, consume one unit immediately.
-    #             for eq in self.task_equipments[i]:
-    #                 eq_idx = self.resources.index(eq)
-    #                 new_inventory[eq_idx] -= 1
-
-    #                 # Schedule the return at t + tau.
-    #                 if 'equipment_returns' not in self.delayed_production_queue:
-    #                     self.delayed_production_queue['equipment_returns'] = {}
-                    
-    #                 if self.t + tau not in self.delayed_production_queue['equipment_returns']:
-    #                     self.delayed_production_queue['equipment_returns'][self.t + tau] = []
-    #                 self.delayed_production_queue['equipment_returns'][self.t + tau].append((eq, 1.0))
-            
-    #         # State most likely to be feasible
-    #         cost = 0.0
-    #         # Calculate the reward for this action
-    #         reward = self._compute_reward(new_inventory, action)
-    #         truncated = False
-
-    #     # Update inventory for next time step
-    #     self.inventory = new_inventory
-    #     self.t += 1
-    #     terminated = self.t >= self.T
-
-    #     return new_inventory, reward, cost, terminated, truncated
-
-
     def _compute_sanitization_cost(self, raw: np.ndarray, final: np.ndarray) -> float:
         """
         If action is getting sanitized then there should be a small cost associated with it
@@ -710,7 +605,28 @@ class RTNEnv(gym.Env):
 
         return (torch.abs(raw - final) > 1e-4).float().sum().item()
     
-    def _compute_product_change(self, new_inventory, action):
+    def _deliver_products(self):
+        """
+        Compute the change of state due to incoming product deliveries due to completion of several tasks
+
+        Inputs:
+            - None
+        Outputs : 
+            - None (updates self.inventory and removes first element from delayed_production_queue)
+        
+        """
+        # Handle delayed product deliveries (including any returns that are scheduled for t).
+        if self.t in self.delayed_production_queue:
+            # There are some products at the next time step coming in
+            for res, amount in self.delayed_production_queue[self.t]:
+                # Add the incoming amount for every product id
+                res_idx = self.resources.index(res)
+                self.inventory[res_idx] += amount
+            
+            # Remove the product delivery at time t to ensure multiple products aren't added
+            del self.delayed_production_queue[self.t]
+
+    def _schedule_products(self, new_inventory, action):
         """
         Compute the inventory change of products and intermediates due to completion of ongoing tasks.
 
@@ -733,16 +649,6 @@ class RTNEnv(gym.Env):
                     self.delayed_production_queue.setdefault(delivery_time, [])
                     self.delayed_production_queue[delivery_time].append((res, coeff * batch))
 
-        # Handle delayed product deliveries (including any returns that are scheduled for t).
-        if self.t in self.delayed_production_queue:
-            # There are some products at the next time step coming in
-            for res, amount in self.delayed_production_queue[self.t]:
-                # Add the incoming amount for every product id
-                res_idx = self.resources.index(res)
-                new_inventory[res_idx] += amount
-            
-            # Remove the product delivery at time t to ensure multiple products aren't added
-            del self.delayed_production_queue[self.t]
         
         # Increase equipment units if task is getting finished at this time step
         
@@ -832,92 +738,6 @@ class RTNEnv(gym.Env):
 
         return final_action
 
-
-    # def _step(self, action) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
-    #     """
-    #     Step function that updates the state based on the action 
-    #         - Sanitization the action based on bounds
-    #         - Computes inventory change for all resources (materials : _compute_resource_change)
-    #         - Computes equipment unit change for all equipments ()
-
-    #     Inputs:
-    #         - action (ndarray)
-    #     Outputs:
-    #         - new state, reward, cost (feasibility checks), truncated (bool), terminated (bool) (ndarray)
-    
-    #     """
-        
-    #     self.logger.debug(f'---- Raw action: {action} ----')
-    #     sanitized_action = self.sanitize_action(action)
-    #     self.logger.debug(f'---- Final sanitized action: {sanitized_action} ----')
-    #     sanit_cost = self._compute_sanitization_cost(action, sanitized_action)
-
-    #     #_, reward, cost, terminated, truncated = self._transition(sanitized_action)
-
-        
-    #     # Start with the current inventory
-    #     new_inventory = self.inventory
-
-    #     new_inventory = self._compute_product_change(new_inventory, sanitized_action)
-
-    #     # Calculate change of each resource
-    #     resource_change = self._compute_resource_change(sanitized_action)
-    #     # Update inventory
-    #     new_inventory += resource_change
-
-    #     # Feasibility checks.
-    #     # Important as production from buffer might cause inv surplus
-    #     inv_ok = self._check_inventory_bounds(new_inventory)
-    #     feasible = inv_ok 
-
-    #     if not feasible:
-    #         self.cost = self._compute_cost(self.inventory)
-    #         self.reward = self._compute_reward(self.inventory, sanitized_action)  # Heavy penalty.
-    #         truncated = False
-    #         new_inventory = self._fix_inventory(new_inventory) # Bound the inventories between lower and upper bounds.
-    #     else:
-    #         # For each executed task, update equipment consumption.
-    #         for i in range(self.num_tasks):
-    #             tau = self.task_taus[i]
-                
-    #             if not sanitized_action[i]:
-    #                 continue
-    #             # For every equipment required, consume one unit immediately.
-    #             for eq in self.task_equipments[i]:
-    #                 eq_idx = self.resources.index(eq)
-    #                 new_inventory[eq_idx] -= 1
-
-    #                 # Schedule the return at t + tau.
-    #                 if 'equipment_returns' not in self.delayed_production_queue:
-    #                     self.delayed_production_queue['equipment_returns'] = {}
-                    
-    #                 if self.t + tau not in self.delayed_production_queue['equipment_returns']:
-    #                     self.delayed_production_queue['equipment_returns'][self.t + tau] = []
-    #                 self.delayed_production_queue['equipment_returns'][self.t + tau].append((eq, 1.0))
-            
-    #         # State most likely to be feasible
-    #         self.cost = 0.0
-    #         # Calculate the reward for this action
-    #         self.reward = self._compute_reward(new_inventory, sanitized_action)
-    #         truncated = False
-
-    #     # Update inventory for next time step
-    #     self.inventory = new_inventory
-    #     self.t += 1
-    #     terminated = self.t >= self.T
-
-    #     state = self._get_state()
-        
-    #     self.cost += self.sanitization_cost_weight * sanit_cost
-
-    #     return (
-    #         torch.from_numpy(state).float(),
-    #         torch.tensor(self.reward, dtype=torch.float32),
-    #         torch.tensor(self.cost, dtype=torch.float32),
-    #         torch.tensor(terminated, dtype=torch.bool),
-    #         torch.tensor(truncated, dtype=torch.bool),
-    #         {}
-    #     )
     
     def step(self, action) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         """
@@ -932,7 +752,7 @@ class RTNEnv(gym.Env):
             - new state, reward - cost (feasibility checks), truncated (bool), terminated (bool) (ndarray)
     
         """
-        
+        self._deliver_products()
         self.logger.debug(f'---- Raw action: {action} ----')
         sanitized_action = self.sanitize_action(action)
         self.logger.debug(f'---- Final sanitized action: {sanitized_action} ----')
@@ -942,9 +762,9 @@ class RTNEnv(gym.Env):
 
         
         # Start with the current inventory
-        new_inventory = self.inventory
+        new_inventory = self.inventory.copy()
 
-        new_inventory = self._compute_product_change(new_inventory, sanitized_action)
+        new_inventory = self._schedule_products(new_inventory, sanitized_action)
 
         # Calculate change of each resource
         resource_change = self._compute_resource_change(sanitized_action)

@@ -238,7 +238,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         if env_id == 'UC-v0':
             if self.scale_action:
                 self.raw_action_space = gym.spaces.Dict({
-                    "on_off": gym.spaces.MultiBinary(self.num_gen),
+                    "on_off": gym.spaces.Box(low=-1, high=1, shape=(self.num_gen,), dtype=np.float32),
                     "power": gym.spaces.Box(low=-1, high=1, shape=(self.num_gen,), dtype=np.float32)
                 })
             else:
@@ -259,7 +259,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         elif env_id == 'UC-v1':
             if self.scale_action:
                 self.raw_action_space = gym.spaces.Dict({
-                    "on_off": gym.spaces.MultiBinary(self.num_gen),
+                    "on_off": gym.spaces.Box(low=-1, high=1, shape=(self.num_gen,), dtype=np.float32),
                     "power": gym.spaces.Box(low=-1, high=1, shape=(self.num_gen,), dtype=np.float32),
                     "angle": gym.spaces.Box(low=-1, high=1, shape=(self.num_bus-1,), dtype=np.float32)
                 })
@@ -289,7 +289,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                        "power": [],
                        "angle": []}
         for i in self.generators:
-            action_low["on_off"].append(0.)
+            action_low["on_off"].append(-1.)
             action_high["on_off"].append(1.)
             action_low["power"].append(self.P_min[i])
             action_high["power"].append(self.P_max[i])
@@ -589,7 +589,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             action_low = {key: np.array(value) for key, value in self.action_low.items()}
             action_high = {key: np.array(value) for key, value in self.action_high.items()}
 
-        on_off_rounded = on_off >= 0.5
+        on_off_rounded = on_off >= 0
         power_scaled = (power + 1) / 2 * (action_high["power"] - action_low["power"]) + action_low["power"]
         angle_scaled = (angle + 1) / 2 * (action_high["angle"] - action_low["angle"]) + action_low["angle"]
         return on_off_rounded, power_scaled, angle_scaled

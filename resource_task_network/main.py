@@ -34,6 +34,7 @@ from environment import SafeRTN
 def main(args, env_id):
     custom_cfgs = Config.dict2config({
         'seed' : args.seed,
+        'train_cfgs'
         'device' : 'cpu',
         'epochs' : 3,
         'steps_per_epoch' : 3,
@@ -41,7 +42,8 @@ def main(args, env_id):
         'use_cost' : True,
         'env_init_config' : {
             'config_file' : args.env_config,
-            'debug' : args.debug
+            'debug' : args.debug,
+            'sanitization_cost_weight' : 1
         }    
     })
     
@@ -66,49 +68,51 @@ def main(args, env_id):
             break
     env.close()
 
-    agent = Agent(ALGO, 'rtn-v0', custom_cfgs = custom_cfgs)  # pass empty custom_cfgs
-    agent.learn()
+    #agent = Agent(ALGO, 'rtn-v0', custom_cfgs = custom_cfgs)  # pass empty custom_cfgs
+    #agent.learn()
 
 
-    # eg = ExperimentGrid(exp_name = 'Benchmark_Safety_rtn_v0')
+    eg = ExperimentGrid(exp_name = 'Benchmark_Safety_rtn_v0')
 
-    # base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
-    # naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
-    # first_order_policy = ['CUP', 'FOCOPS', 'P3O']
-    # second_order_policy = ['CPO', 'PCPO']
+    base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
+    naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
+    first_order_policy = ['CUP', 'FOCOPS', 'P3O']
+    second_order_policy = ['CPO']#, 'PCPO']
 
-    # mujoco_envs = [
-    #     'rtn-v0'
-    # ]
-    # eg.add('env_id', mujoco_envs)
+    mujoco_envs = [
+        'rtn-v0'
+    ]
+    eg.add('env_id', mujoco_envs)
 
-    # available_gpus = list(range(torch.cuda.device_count()))
-    # gpu_id = [0]
+    available_gpus = list(range(torch.cuda.device_count()))
+    gpu_id = [0]
     
-    # if gpu_id and not set(gpu_id).issubset(available_gpus):
-    #     warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
-    #     gpu_id = None
+    if gpu_id and not set(gpu_id).issubset(available_gpus):
+        warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
+        gpu_id = None
 
     
-    # eg.add('seed', [args.seed])
+    eg.add('seed', [args.seed])
     
-    # eg.add('algo', base_policy + naive_lagrange_policy + first_order_policy + second_order_policy)
+    eg.add('algo', second_order_policy)
     
-    # eg.add('logger_cfgs : use_wandb', [False])
-    # eg.add('logger_cfgs : use_tensorboard', [True])
+    eg.add('logger_cfgs:use_wandb', [False])
+    eg.add('logger_cfgs:use_tensorboard', [True])
 
-    # eg.add('train_cfgs:vector_env_nums', [1])
-    # eg.add('train_cfgs:torch_threads', [1])
-    # eg.add('train_cfgs:total_steps', [100])
+    eg.add('train_cfgs:vector_env_nums', [1])
+    eg.add('train_cfgs:torch_threads', [1])
+    eg.add('train_cfgs:device', ['cpu'])
+    eg.add('train_cfgs:total_steps', [100])
     
-    # eg.add('model_cfgs:actor:output_activation', ['tanh'])
+    eg.add('model_cfgs:actor:output_activation', ['tanh'])
 
-    # eg.add('algo_cfgs:steps_per_epoch', [20])
-    # eg.add('train_cfgs:device', ['cuda:0'])
+    eg.add('algo_cfgs:steps_per_epoch', [20])
+    eg.add('env_cfgs:env_init_config:config_file', [args.env_config])
+    eg.add('env_cfgs:env_init_config:debug', [args.debug])
 
-    # eg.run(train, num_pool=12, gpu_id=gpu_id)
-    # eg.analyze(parameter='algo', values=None, compare_num=12)
-    # a = eg.evaluate(num_episodes=10)
+    eg.run(train, num_pool = 1, gpu_id=gpu_id)
+    eg.analyze(parameter='algo', values = None, compare_num = 1)
+    a = eg.evaluate(num_episodes = 10)
 
 
 if __name__ == '__main__':
