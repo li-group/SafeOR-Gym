@@ -63,6 +63,7 @@ class RTNEnv(gym.Env):
 
     The following functions are included:
         - init : to initialize all the configuration parameters:
+        - get_data : Loads all the environment parameters from the config file
         - reset : resets the timestep to 0 and all the inventory to the initial inventory
         - step : changes the state based on the action given by the agent
         - get_state : gets the current state based on the inventory + incoming products + future demand
@@ -76,7 +77,9 @@ class RTNEnv(gym.Env):
         - compute_utility_cost : computes the cost of the utilities
         - compute_reward : computes the reward for that action
         - compute_sanitization_cost :  computes the cost of sanitizing the action (a larger degree of sanitization implies a higher cost)
-        - compute_product_change : computes the delivery of products at that time step due to previous action (task) execution
+        - _update_delivery_products : computes the delivery of products at that time step due to previous action (task) execution
+        - _update_scheduled_products : schedule the delivery of products at future time step based on current action (task)
+        - set_seed : sets the random seed for reproducibility
 
             
     """
@@ -148,7 +151,7 @@ class RTNEnv(gym.Env):
             self.logger.setLevel(logging.WARNING)
 
         self.logger.debug('---- Building environment ---- ')
-        self.load_data_from_file()
+        self.get_data()
 
         if self.demand is not None:
             self.num_periods = len(self.demand[list(self.demand.keys())[0]])
@@ -261,7 +264,7 @@ class RTNEnv(gym.Env):
         self.logger.debug(f'---- Shape of observation space : inv ({len(self.resources)}, ), pending outputs : ({self.max_tau * (len(self.pending_resources))}, ), demand : ({len(self.products) * self.T}, )')
 
 
-    def load_data_from_file(self):
+    def get_data(self):
         """
         Loads the data from a given environment configuration file.
 
@@ -312,16 +315,16 @@ class RTNEnv(gym.Env):
         # Reset inventory (including equipments) to initial values.
         self.inventory = np.array([self.initial_inventory[r] for r in self.resources], dtype=np.float32)
         self.delayed_production_queue = {t: [] for t in range(self.t + 1, self.t + self.max_tau + 1)}
-        state = self._get_state()
+        state = self._update_state()
 
         return torch.from_numpy(state).float().to(self.device), {}
 
-    def _get_current_demand(self) -> np.ndarray:
+    def _compute_current_demand(self) -> np.ndarray:
         demand_vec = np.array([self.demand.get(prod, [0.0] * self.T)[self.t] if self.t < len(self.demand.get(prod, [])) else 0.0 for prod in self.products], dtype=np.float32)
         
         return demand_vec
 
-    def _get_padded_future_demand(self) -> np.ndarray:
+    def _compute_padded_future_demand(self) -> np.ndarray:
         """
         Obtain the demand from time step t till the end of the horizon.
         Then pad it with 0s to keep a consistent shape across all states
@@ -348,7 +351,7 @@ class RTNEnv(gym.Env):
 
         return np.array(future_demand, dtype=np.float32)
 
-    def _get_state(self) -> np.ndarray:
+    def _update_state(self) -> np.ndarray:
         """
         Construct the observation vector for this current timestep.
             - Inventory for all resources (including equipments)
@@ -383,13 +386,13 @@ class RTNEnv(gym.Env):
         state_parts.append(pending.flatten())
 
         # State has the future demand (+ padding) finally
-        self.logger.debug(f'---- Padded future demand : {self._get_padded_future_demand()} ----')
-        state_parts.append(self._get_padded_future_demand())
+        self.logger.debug(f'---- Padded future demand : {self._compute_padded_future_demand()} ----')
+        state_parts.append(self._compute_padded_future_demand())
 
         return np.concatenate(state_parts)
 
 
-    def _check_inventory_bounds(self, new_inventory: np.ndarray) -> bool:
+    def _compute_inventory_bounds(self, new_inventory: np.ndarray) -> bool:
         """
         Checks if any of the inventory bounds have been violated.
 
@@ -410,13 +413,13 @@ class RTNEnv(gym.Env):
 
         if violated:
             for res, inv, lb, ub in violated:
-                self.logger.debug(f'---- {res} : {val:.3f} (bounds: {lb:.3f}–{ub:.3f}) ----')
+                self.logger.debug(f'---- {res} : {inv:.3f} (bounds: {lb:.3f}–{ub:.3f}) ----')
             
                 self.env_spec_log['Penalties/inv_ub'] += 1
                 return False
         return True
 
-    def _fix_inventory(self, new_inventory: np.ndarray) -> np.ndarray:
+    def _update_fix_inventory(self, new_inventory: np.ndarray) -> np.ndarray:
         """
         Fixes the inventory in case of any overflow due to delivery of products based on prior executed task
 
@@ -467,26 +470,6 @@ class RTNEnv(gym.Env):
             total_change += action[i] * change
         
         return total_change
-
-    # def _compute_equipment_change(self, action: np.ndarray) -> np.ndarray:
-    #     """
-    #     Compute units of each equipment (stoichiometry for equipments)
-        
-    #     Inputs 
-    #         - action (batch size of each task)
-        
-    #     Outputs
-    #         - None (updates inventory directly)
-        
-    #     """
-    #     for i in range(self.num_tasks):
-    #         if action[i]:
-    #             equip_ids = self.task_equipments[i]  # Equipment used by this task
-                
-    #             for eq in equip_ids:
-    #                 eq_idx = self.resources.index(eq)
-    #                 self.inventory[eq_idx] -= 1  # Use one unit of equipment
-
 
     def _compute_cost(self, inventory: np.ndarray) -> float:
         """
@@ -559,7 +542,7 @@ class RTNEnv(gym.Env):
         )
         product_indices_list = list(product_indices)
 
-        current_demand = self._get_current_demand()
+        current_demand = self._compute_current_demand()
         product_price = {prod: self.prods_dict[prod]['cost'] for prod in self.products}
 
         # Extract product inventories
@@ -618,7 +601,7 @@ class RTNEnv(gym.Env):
 
         return (torch.abs(raw - final) > 1e-4).float().sum().item()
     
-    def _deliver_products(self):
+    def _update_delivery_products(self):
         """
         Compute the change of state due to incoming product deliveries due to completion of several tasks
 
@@ -639,7 +622,7 @@ class RTNEnv(gym.Env):
             # Remove the product delivery at time t to ensure multiple products aren't added
             del self.delayed_production_queue[self.t]
 
-    def _schedule_products(self, new_inventory, action):
+    def _update_scheduled_products(self, new_inventory, action):
         """
         Compute the inventory change of products and intermediates due to completion of ongoing tasks.
 
@@ -754,7 +737,7 @@ class RTNEnv(gym.Env):
             - new state, reward - cost (feasibility checks), truncated (bool), terminated (bool) (ndarray)
     
         """
-        self._deliver_products()
+        self._update_delivery_products()
         self.logger.debug(f'---- Raw action: {action} ----')
         sanitized_action = self.sanitize_action(action)
         self.logger.debug(f'---- Final sanitized action: {sanitized_action} ----')
@@ -766,7 +749,7 @@ class RTNEnv(gym.Env):
         # Start with the current inventory
         new_inventory = self.inventory.copy()
 
-        new_inventory = self._schedule_products(new_inventory, sanitized_action)
+        new_inventory = self._update_scheduled_products(new_inventory, sanitized_action)
 
         # Calculate change of each resource
         resource_change = self._compute_resource_change(sanitized_action)
@@ -775,14 +758,14 @@ class RTNEnv(gym.Env):
 
         # Feasibility checks.
         # Important as production from buffer might cause inv surplus
-        inv_ok = self._check_inventory_bounds(new_inventory)
+        inv_ok = self._compute_inventory_bounds(new_inventory)
         feasible = inv_ok 
 
         if not feasible:
             self.cost = self._compute_cost(self.inventory)
             self.reward = self._compute_reward(self.inventory, sanitized_action)  # Heavy penalty.
             truncated = False
-            new_inventory = self._fix_inventory(new_inventory) # Bound the inventories between lower and upper bounds.
+            new_inventory = self._update_fix_inventory(new_inventory) # Bound the inventories between lower and upper bounds.
         else:
             # For each executed task, update equipment consumption.
            
@@ -810,7 +793,7 @@ class RTNEnv(gym.Env):
 
         # Update inventory for next time step
         self.inventory = new_inventory
-        state = self._get_state()
+        state = self._update_state()
         self.t += 1
         terminated = self.t >= self.T
         

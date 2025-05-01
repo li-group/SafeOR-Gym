@@ -90,6 +90,8 @@ def main(args, env_id):
         warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
         gpu_id = None
 
+    STEPS_PER_EPOCH = 30
+    T = 30
     
     eg.add('seed', [args.seed])
     
@@ -97,6 +99,7 @@ def main(args, env_id):
     
     eg.add('logger_cfgs:use_wandb', [False])
     eg.add('logger_cfgs:use_tensorboard', [True])
+    eg.add('logger_cfgs:window_lens', [int(STEPS_PER_EPOCH / T)])
 
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
@@ -105,7 +108,7 @@ def main(args, env_id):
     
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
 
-    eg.add('algo_cfgs:steps_per_epoch', [100])
+    eg.add('algo_cfgs:steps_per_epoch', [STEPS_PER_EPOCH])
     eg.add('env_cfgs:env_init_config:config_file', [args.env_config])
     eg.add('env_cfgs:env_init_config:debug', [False])
     eg.add('env_cfgs:env_init_config:sanitization_cost_weight', [1.0])
