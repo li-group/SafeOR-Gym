@@ -770,8 +770,9 @@ class STNEnv(gym.Env):
             - new state, reward - cost (feasibility checks), truncated (bool), terminated (bool) (ndarray)
     
         """
-
+        # Clip action between -1.0 and 1.0
         action = unflatten_action_vector(action, self.num_tasks, len(self.equipments))
+        action = torch.clamp(action, min = -1.0, max = 1.0)
 
         self._update_delivery_products()
         self.logger.debug(f'---- Raw action: {action} ----')

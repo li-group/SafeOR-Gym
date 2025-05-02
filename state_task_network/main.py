@@ -101,7 +101,9 @@ def main(args, env_id):
         gpu_id = None
 
     T = 10
-    STEPS_PER_EPOCH = T
+    STEPS_PER_EPOCH = 80
+    TOTAL_EPOCHS = 1000
+    TOTAL_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS
 
     eg.add('seed', [args.seed])
     
@@ -115,16 +117,17 @@ def main(args, env_id):
     eg.add('train_cfgs:torch_threads', [1])
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     eg.add('train_cfgs:device', [device])
-    eg.add('train_cfgs:total_steps', [10000])
+    eg.add('train_cfgs:total_steps', [TOTAL_STEPS])
     
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
 
     eg.add('algo_cfgs:steps_per_epoch', [STEPS_PER_EPOCH])
+
     eg.add('env_cfgs:env_init_config:config_file', [args.env_config])
-    eg.add('env_cfgs:env_init_config:debug', [False])
+    eg.add('env_cfgs:env_init_config:debug', [args.debug])
     eg.add('env_cfgs:env_init_config:sanitization_cost_weight', [1.0])
     eg.add('env_cfgs:env_init_config:cost_coefficient', [1.0])
-
+    
     eg.run(train, num_pool = 1, gpu_id = gpu_id)
     eg.analyze(parameter = 'algo', values=None, compare_num = 1)
     a = eg.evaluate(num_episodes = 1)

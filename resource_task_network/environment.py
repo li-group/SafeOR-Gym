@@ -667,9 +667,9 @@ class RTNEnv(gym.Env):
             - sanitized action (torch.tensor)
     
         """
-        self.logger.debug('---- Sanitising action ----')
         duplicate_inventory = self.inventory.copy()
-
+        
+        self.logger.debug('---- Sanitising action ----')
         scaled_action = 0.5 * (raw_action + 1.0) * (self.max_batch - self.min_batch) + self.min_batch
         self.logger.debug(f'---- Scaled action: {scaled_action} ----')
         
@@ -741,6 +741,9 @@ class RTNEnv(gym.Env):
             - new state, reward - cost (feasibility checks), truncated (bool), terminated (bool) (ndarray)
     
         """
+        # Clip action between -1.0 and 1.0
+        action = torch.clamp(action, min = -1.0, max = 1.0)
+
         self._update_delivery_products()
         self.logger.debug(f'---- Raw action: {action} ----')
         sanitized_action = self.sanitize_action(action)
