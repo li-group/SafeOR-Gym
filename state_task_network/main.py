@@ -34,16 +34,27 @@ from environment import SafeSTN
 def main(args, env_id):
     custom_cfgs = Config.dict2config({
         'seed' : args.seed,
-        'device' : 'cpu',
-        'epochs' : 3,
-        'steps_per_epoch' : 3,
-        'max_ep_len' : 10,
-        'use_cost' : True,
-        'env_init_config' : {
+        'train_cfgs':{
+            'device' : 'cpu',
+            'total_steps':1000,
+        },
+        'algo_cfgs':{
+            'steps_per_epoch' : 10
+        },
+        'model_cfgs' : {
+            'actor' : {
+                'output_activation' : 'tanh'
+            }
+        },
+        'env_cfgs':{
+            'env_init_config' : {
             'config_file' : args.env_config,
             'debug' : args.debug,
-            'sanitization_cost_weight' : 1
+            'sanitization_cost_weight' : 1.0,
+            'cost_coefficient' : 1.0
+            }
         }
+            
     })
     
     #env = SafeSTN('stn-v0', **custom_cfgs)
@@ -67,9 +78,8 @@ def main(args, env_id):
             break
     #env.close()
 
-    # agent = Agent(ALGO, 'stn-v0', custom_cfgs = custom_cfgs)  # pass empty custom_cfgs
-    # agent.learn()
-
+    #agent = Agent('CPO', 'stn-v0', custom_cfgs = custom_cfgs)  # pass empty custom_cfgs
+    #agent.learn()
 
     eg = ExperimentGrid(exp_name = 'Benchmark_Safety_stn_v0')
 
@@ -90,9 +100,9 @@ def main(args, env_id):
         warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
         gpu_id = None
 
-    STEPS_PER_EPOCH = 30
-    T = 30
-    
+    T = 10
+    STEPS_PER_EPOCH = T
+
     eg.add('seed', [args.seed])
     
     eg.add('algo', second_order_policy)
@@ -103,8 +113,9 @@ def main(args, env_id):
 
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
-    eg.add('train_cfgs:device', ['cuda:0'])
-    eg.add('train_cfgs:total_steps', [100000])
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    eg.add('train_cfgs:device', [device])
+    eg.add('train_cfgs:total_steps', [10000])
     
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
 
@@ -112,6 +123,7 @@ def main(args, env_id):
     eg.add('env_cfgs:env_init_config:config_file', [args.env_config])
     eg.add('env_cfgs:env_init_config:debug', [False])
     eg.add('env_cfgs:env_init_config:sanitization_cost_weight', [1.0])
+    eg.add('env_cfgs:env_init_config:cost_coefficient', [1.0])
 
     eg.run(train, num_pool = 1, gpu_id = gpu_id)
     eg.analyze(parameter = 'algo', values=None, compare_num = 1)
@@ -124,7 +136,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--env_config', type = str, default = "structured_environment_data.json", help = "Path to yaml file containint environment configuration parameters")
+    parser.add_argument('--env_config', type = str, default = "easy_environment_data.json", help = "Path to yaml file containint environment configuration parameters")
     parser.add_argument('--seed', type = int, default = 10, help = "Seed for reproducability")
     parser.add_argument('--debug', action = "store_true", help = "Enable debugging logging")
 

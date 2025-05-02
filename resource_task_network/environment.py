@@ -140,8 +140,9 @@ class RTNEnv(gym.Env):
         self.config_file = kwargs.get('config_file')        
         self.debug = kwargs.get('debug', False)
         self.sanitization_cost_weight = kwargs.get('sanitization_cost_weight')
+        self.cost_coefficient = kwargs.get('cost_coefficient', 1.0)
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        self.env_spec_log = {"Penalties/inv_lb" : 0, "Penalties/inv_ub" : 0, "Penalties/equip_lb" : 0}
+        self.env_spec_log = {"Penalties/inv_lb" : 0, "Penalties/inv_ub" : 0, "Penalties/equip_lb" : 0., 'Rewards/revenue' : 0., 'Rewards/utility_cost' : 0, 'Rewards/unmet_penalty' : 0, 'Rewards/reactant_penalty' : 0}
         
         if self.debug:
             logging.basicConfig(level = logging.DEBUG)
@@ -552,7 +553,7 @@ class RTNEnv(gym.Env):
         min_inventory = np.array([self.lower_bounds[idx] for idx in product_indices_list])
 
         # Available inventory to fulfill demand (without dropping below min bounds)
-        available_to_fulfill = np.clip(prod_inventory - min_inventory, a_min=0.0, a_max=None)
+        available_to_fulfill = np.clip(prod_inventory - min_inventory, a_min = 0.0, a_max = None)
 
         # Calculate revenue from fulfilled demand
         for idx, prod in enumerate(self.products):
@@ -566,8 +567,6 @@ class RTNEnv(gym.Env):
         unmet_demand = current_demand - np.minimum(current_demand, available_to_fulfill)
         unmet_penalty = sum(1.5 * unmet_demand[i] * product_price.get(prod) for i, prod in enumerate(self.products)) # 1.5 is a tunable penalty coefficient
 
-        reward = revenue - utility_cost - unmet_penalty  
-        
         reactant_penalty = 0.0
         for idx, r in enumerate(self.reactants):
             inv_idx = self.resources.index(r)
@@ -576,30 +575,36 @@ class RTNEnv(gym.Env):
                 price = self.raws_dict[r]['cost']  # Cost of buying that reactant
                 reactant_penalty += deficit * price
 
-        self.logger.debug(f"---- Reactant penalty: {reactant_penalty:.3f} ----")
-        reward -= reactant_penalty
+        reward = revenue - utility_cost - unmet_penalty + reactant_penalty
+        
+        self.logger.debug(f"---- Revenue : {revenue:.3f}, Util Cost : {utility_cost:.3f}, Unmet Penalty : {unmet_penalty:.3f}, Reactant order: {reactant_penalty:.3f} ----")
+        self.env_spec_log['Rewards/revenue'] += revenue
+        self.env_spec_log['Rewards/utility_cost'] += utility_cost
+        self.env_spec_log['Rewards/unmet_penalty'] += unmet_penalty
+        self.env_spec_log['Rewards/reactant_penalty'] += reactant_penalty
 
         return reward
 
-    def _compute_sanitization_cost(self, raw: np.ndarray, final: np.ndarray) -> float:
+    def _compute_sanitization_cost(self, raw_action: np.ndarray, sanitized_action: np.ndarray) -> float:
         """
         If action is getting sanitized then there should be a small cost associated with it
         The raw action is scaled as it a part of the model rather than env.
 
         Inputs:
-            - raw : ndarray (raw action)
-            - final : ndarray (sanitized action)
+            - raw_action : ndarray (raw action)
+            - sanitized_action : ndarray (sanitized action)
 
         Outputs:
             - cost : scalar (how much sanitized action is different from raw action) Higher values mean more sanitization was necessary.
 
         """
-        if not isinstance(final, torch.Tensor):
-            final = torch.from_numpy(final)
-        if not isinstance(raw, torch.Tensor):
-            raw = torch.from_numpy(raw)
+        scaled_action = 0.5 * (raw_action + 1.0) * (self.max_batch - self.min_batch) + self.min_batch
+        if not isinstance(sanitized_action, torch.Tensor):
+            sanitized_action = torch.from_numpy(sanitized_action)
+        if not isinstance(scaled_action, torch.Tensor):
+            scaled_action = torch.from_numpy(scaled_action)
 
-        return (torch.abs(raw - final) > 1e-4).float().sum().item()
+        return (torch.abs(scaled_action - sanitized_action) > 1e-4).float().sum().item()
     
     def _update_delivery_products(self):
         """
@@ -687,7 +692,7 @@ class RTNEnv(gym.Env):
                 coeff = stoich.get(r, 0.0)
                 if coeff < 0:  # Only consider consumption terms
                     # How much we can afford to consume without violating the lower bound
-                    available = self.inventory[j] - self.lower_bounds[j]
+                    available = np.clip(self.inventory[j] - self.lower_bounds[j], a_min = 0.0, a_max = None)
                     feasible_batch_r = available / abs(coeff)  # Maximum batch that does not violate the lower bound
                     max_feasible_batch = min(max_feasible_batch, feasible_batch_r)  # Get the limiting factor
 
@@ -714,7 +719,6 @@ class RTNEnv(gym.Env):
                 self.env_spec_log["Penalties/equip_lb"] += 1
                 continue
             else:
-                # Reduce equipments to track combinationally infeasible tasks
                 final_action[i] = candi_action[i]
                 for e in equip_ids:
                     duplicate_inventory[self.resources.index(e)] -= 1 
@@ -798,6 +802,9 @@ class RTNEnv(gym.Env):
         terminated = self.t >= self.T
         
         self.cost += self.sanitization_cost_weight * sanit_cost
+        self.cost = self.cost_coefficient * self.cost
+
+        self.logger.debug(f'---- Reward : {self.reward:.4f}, Cost : {self.cost:.4f} ----')
 
         return (
             torch.from_numpy(state).float(),
