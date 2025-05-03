@@ -236,15 +236,16 @@ def recurse(eg, current, path=[], ):
 if __name__ == '__main__':
     debug_use = True
 
-    eg = ExperimentGrid(exp_name='Benchmark_UC2')
+    eg = ExperimentGrid(exp_name='Benchmark_UC3')
 
     if debug_use == True:
         base_policy = []
         naive_lagrange_policy = []
         first_order_policy = []
         second_order_policy = ['CPO']
-        steps_per_epoch = [24*100]
-        total_steps = [24*100*1000]
+        episodes_per_epoch = 3
+        steps_per_epoch = [24*episodes_per_epoch]
+        total_steps = [24*episodes_per_epoch*5]
         num_episodes = 10
 
     else:
@@ -252,10 +253,12 @@ if __name__ == '__main__':
         naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
         first_order_policy = ['CUP', 'FOCOPS', 'P3O']
         second_order_policy = ['CPO', 'PCPO']
-        steps_per_epoch = [24]
-        total_steps = [48]
+        episodes_per_epoch = 30
+        steps_per_epoch = [24 * episodes_per_epoch]
+        total_steps = [24 * episodes_per_epoch * 500]
         num_episodes = 10
 
+    window_lens = [episodes_per_epoch]
     algos = base_policy + naive_lagrange_policy + first_order_policy + second_order_policy
     num_pool = len(algos)
     compare_num = len(algos)
@@ -280,6 +283,7 @@ if __name__ == '__main__':
     eg.add('algo', algos)
     eg.add('logger_cfgs:use_wandb', [False])
     eg.add('logger_cfgs:use_tensorboard', [True])
+    eg.add('logger_cfgs:window_lens', window_lens)
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
 
@@ -289,7 +293,7 @@ if __name__ == '__main__':
     eg.add('env_cfgs:env_init_config:penalty_factor_DT', [10])
     eg.add('env_cfgs:env_init_config:penalty_factor_RampUp', [10])
     eg.add('env_cfgs:env_init_config:penalty_factor_RampDown', [10])
-    eg.add('env_cfgs:env_init_config:penalty_factor_irreparable', [1000])
+    eg.add('env_cfgs:env_init_config:penalty_factor_irreparable', [10])
 
     # recurse(eg, env_config)
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
@@ -297,8 +301,8 @@ if __name__ == '__main__':
     eg.add('train_cfgs:total_steps', total_steps)
     eg.add('seed', [0])
     eg.add('train_cfgs:device', device)
-    # total experiment num must can be divided by num_pool
-    # meanwhile, users should decide this value according to their machine
+
+
     eg.run(train, num_pool=num_pool, gpu_id=gpu_id)
 
     eg.analyze(parameter='algo', values=None, compare_num=compare_num)

@@ -105,8 +105,8 @@ class UnitCommitmentMasterEnv(gym.Env):
                              'Penalty of Ramping Up Violation': 0,
                              'Number of Ramping Down Violation': 0,
                              'Penalty of Ramping Down Violation': 0,
-                             'Number of Irreparable Violation': 0,
-                             'Penalty of Irreparable Violation': 0,
+                             # 'Number of Irreparable Violation': 0,
+                             # 'Penalty of Irreparable Violation': 0,
                              }
 
         self.penalty_factor_UT = 100
@@ -205,7 +205,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.cold_cost = np.array([9000, 1100, 1120, 340, 60])
         self.cold_hrs = np.array([5, 4, 4, 2, 0])
         self.C_SD = np.array([0, 0, 0, 0, 0])
-        self.C_LS = 10000
+        self.C_LS = 100
         self.C_RP = 100
         self.R = 10
 
@@ -444,42 +444,43 @@ class UnitCommitmentMasterEnv(gym.Env):
         u_new = on_off
         u_curr = self.u
         v_new, w_new = self._reckless_move(u_new, u_curr)
-        p_new = power
+        p_new = u_new * power
         p_curr = self.p
         pi_new = angle
 
-        # check contradiction
-        # we must keep it off, as turning on will result in a too early turn-on
-        must_off = np.array([np.sum(self.w_seq[i][:-1]) for i in self.generators]) > 0
-        # we must keep it on, as turning off will result in a too large decrease
-        must_on = p_curr > self.SD
-        contradiction = must_on & must_off
+        # # check contradiction
+        # # we must keep it off, as turning on will result in a too early turn-on
+        # must_off = np.array([np.sum(self.w_seq[i][:-1]) for i in self.generators]) > 0
+        # # we must keep it on, as turning off will result in a too large decrease
+        # must_on = p_curr > self.SD
+        # contradiction = must_on & must_off
 
-        # repair part of the action
-        repaired_pi_new = np.minimum(np.maximum(pi_new, self.Pi_min), self.Pi_max)
-        # the decision, on, implies turn-on and violates DT, so must keep it off
-        # the decision, off, implies turn-off and violates UT, so must keep it on
-        UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
-        repaired_u_new = np.where(DT_violation, 0, np.where(UT_violation, 1, u_new))
-        repaired_v_new, repaired_w_new = self._reckless_move(repaired_u_new, u_curr)
-
-        if np.any(contradiction):
-            # self.truncated = True # DON'T TRUNCATE EVEN THOUGH WE CANNOT REPAIR THE ACTION
-            repaired_p_new = u_new * np.minimum(np.maximum(p_new, self.P_min), self.P_max)
-            # ADD UP A VERY LARGE COST INSTEAD
-            irreparable_violation = contradiction
-            irreparable_cost = np.sum(contradiction) * self.penalty_factor_irreparable
-            self.cost += irreparable_cost
-
-            self.env_spec_log['Number of Irreparable Violation'] += np.sum(irreparable_violation)
-            self.env_spec_log['Penalty of Irreparable Violation'] += irreparable_cost
-
-        else:
-            # repair the rest of the action
-            ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
-            lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
-            repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
-        return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_pi_new
+        # # repair part of the action
+        # repaired_pi_new = np.minimum(np.maximum(pi_new, self.Pi_min), self.Pi_max)
+        # # the decision, on, implies turn-on and violates DT, so must keep it off
+        # # the decision, off, implies turn-off and violates UT, so must keep it on
+        # UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
+        # repaired_u_new = np.where(DT_violation, 0, np.where(UT_violation, 1, u_new))
+        # repaired_v_new, repaired_w_new = self._reckless_move(repaired_u_new, u_curr)
+        #
+        # if np.any(contradiction):
+        #     # self.truncated = True # DON'T TRUNCATE EVEN THOUGH WE CANNOT REPAIR THE ACTION
+        #     repaired_p_new = u_new * np.minimum(np.maximum(p_new, self.P_min), self.P_max)
+        #     # ADD UP A VERY LARGE COST INSTEAD
+        #     irreparable_violation = contradiction
+        #     irreparable_cost = np.sum(contradiction) * self.penalty_factor_irreparable
+        #     self.cost += irreparable_cost
+        #
+        #     self.env_spec_log['Number of Irreparable Violation'] += np.sum(irreparable_violation)
+        #     self.env_spec_log['Penalty of Irreparable Violation'] += irreparable_cost
+        #
+        # else:
+        #     # repair the rest of the action
+        #     ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
+        #     lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
+        #     repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
+        # return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_pi_new
+        return u_new, v_new, w_new, p_new, pi_new
 
     def _compute_reserve(self, u_new: np.ndarray,
                          v_new: np.ndarray, w_new: np.ndarray, p_new: np.ndarray) -> np.ndarray:
@@ -589,7 +590,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             action_low = {key: np.array(value) for key, value in self.action_low.items()}
             action_high = {key: np.array(value) for key, value in self.action_high.items()}
 
-        on_off_rounded = on_off >= 0
+        on_off_rounded = (on_off >= 0).float() if torch.is_tensor(on_off) else (on_off >= 0).astype(float)
         power_scaled = (power + 1) / 2 * (action_high["power"] - action_low["power"]) + action_low["power"]
         angle_scaled = (angle + 1) / 2 * (action_high["angle"] - action_low["angle"]) + action_low["angle"]
         return on_off_rounded, power_scaled, angle_scaled
