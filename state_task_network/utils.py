@@ -1,4 +1,13 @@
 import pyomo.environ as po
+import numpy as np
+import torch
+
+def flatten_action_matrix(action_matrix : torch.Tensor, num_tasks : int, num_equipments : int) -> torch.Tensor:
+    return action_matrix.reshape((num_tasks * num_equipments))
+
+def unflatten_action_vector(action_vector : torch.Tensor, num_tasks : int, num_equipments : int) -> torch.Tensor:
+    return action_vector.reshape((num_tasks, num_equipments))
+
 
 def init_stn_model(args, net, resources_and_task, demand_dict, supply_dict, utility_cost):
     S, T, E, U = resources_and_task  # States, Tasks, Equipments, Utilities
