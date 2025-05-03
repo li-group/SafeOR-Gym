@@ -29,7 +29,7 @@ from GASU_env import GASU
 
 @env_register
 class GASU_env_safe(CMDP):
-    _support_envs = ['Integrated-Scheduling-and-Maintenance']
+    _support_envs = ['GASU-v0']
     need_auto_reset_wrapper = True  
     need_time_limit_wrapper = True  
     num_envs = 1
@@ -92,6 +92,8 @@ class GASU_env_safe(CMDP):
     def env_spec_log(self):
         return self._env.env_spec_log
 
+
+
 '''if __name__ == "__main__":
     import omnisafe
     ALGO = "CPO"
@@ -127,20 +129,26 @@ def recurse(eg,current, path=[],):
     else:
         key = 'env_cfgs:' + ':'.join(path)
         val = current if isinstance(current, list) else [current]
-        eg.add(key, val)
+        # eg.add(key, val)
+        if isinstance(val, dict):
+            eg.add(key, [str(val)])
+        elif isinstance(val, list) and any(isinstance(v, dict) for v in val):
+            eg.add(key, [str(v) if isinstance(v, dict) else v for v in val])
+        else:
+            eg.add(key, val)
 
 if __name__ == '__main__':
     eg = ExperimentGrid(exp_name='Benchmark_ISM_safe_1')
 
-    base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
-    naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
-    first_order_policy = ['CUP', 'FOCOPS', 'P3O']
-    second_order_policy = ['CPO', 'PCPO']
-    saute_policy = ['PPOSaute', 'TRPOSaute']
-    simmer_policy = ['PPOSimmerPID', 'TRPOSimmerPID']
-    early_policy = ['']
-    primal_policy  = ['OnCRPO']
-    off_policy = ['DDPG', 'SAC', 'TD3', 'DDPGLag', 'TD3Lag', 'SACLag', 'DDPGPID', 'TD3PID', 'SACPID']
+    # base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
+    # naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
+    # first_order_policy = ['CUP', 'FOCOPS', 'P3O']
+    second_order_policy = ['CPO'] #, 'PCPO']
+    # saute_policy = ['PPOSaute', 'TRPOSaute']
+    # simmer_policy = ['PPOSimmerPID', 'TRPOSimmerPID']
+    # early_policy = ['']
+    # primal_policy  = ['OnCRPO']
+    # off_policy = ['DDPG', 'SAC', 'TD3', 'DDPGLag', 'TD3Lag', 'SACLag', 'DDPGPID', 'TD3PID', 'SACPID']
     #off_policy = ['DDPG', 'SAC', 'TD3']
     #off_policy = ['CPO']
     #model_based_base_policy = ['LOOP', 'PETS']
@@ -151,9 +159,19 @@ if __name__ == '__main__':
     # Set the environments.
     
     mujoco_envs = [
-        'Integrated-Scheduling-and-Maintenance'
+        'GASU-v0'
     ]
     eg.add('env_id', mujoco_envs)
+
+
+    #####
+    # 3) Load & preprocess env-init config from JSON
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    cfg_path = os.path.join(script_dir, "gasu_config.json")
+
+
+    ###
+    # env_register(GASU_env_safe)
 
     # Set the device.
     avaliable_gpus = list(range(torch.cuda.device_count()))
@@ -164,15 +182,24 @@ if __name__ == '__main__':
     if gpu_id and not set(gpu_id).issubset(avaliable_gpus):
         warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
         gpu_id = None
-    num_steps_per_epoch = 1000
-    total_epochs = 150
-    total_steps = num_steps_per_epoch*total_epochs
-    
-    # config_path="gasu_config.json"
-    env_config = "gasu_config.json"
+
+    num_episodes_per_epoch = 20
+    episode_length = 31  # assume your env has T=31
+    num_steps_per_epoch = episode_length * num_episodes_per_epoch
+    # total_epochs = 1000
+    total_epochs = 355
+    total_steps = num_steps_per_epoch * total_epochs
+
+    env_config = json.load(open("gasu_config.json"))
+    # env_config['env_init_cfgs'] = {'T': 24}
 
     # eg.add('algo',base_policy+naive_lagrange_policy+first_order_policy+second_order_policy+saute_policy+simmer_policy+primal_policy+off_policy)
+    from omnisafe.envs.core import support_envs
+    print('✅ Registered envs:', support_envs())
+
     eg.add('algo',second_order_policy)
+    # eg.add('algo_cfgs:obs_normalize',[False])
+
     #eg.add('algo','CPO')
     eg.add('logger_cfgs:use_wandb', [False])
     eg.add('logger_cfgs:use_tensorboard', [True])
@@ -180,18 +207,35 @@ if __name__ == '__main__':
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
    
-    recurse(eg, env_config)
+    # recurse(eg, env_config)
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
     eg.add('algo_cfgs:steps_per_epoch', [num_steps_per_epoch])
-    #eg.add('algo_cfgs:cost_limit', [25])
     eg.add('train_cfgs:total_steps', [total_steps])
-    eg.add('logger_cfgs:window_lens', [int(num_steps_per_epoch/env_config['env_init_cfgs']['T'])])
+    eg.add('logger_cfgs:window_lens', [num_episodes_per_epoch])
+    
+    #eg.add('algo_cfgs:cost_limit', [25])
+    # eg.add('train_cfgs:total_steps', [total_steps])
+
+
+
+
+    # OLD
+    # eg.add('algo_cfgs:steps_per_epoch', [num_steps_per_epoch])
+    # eg.add('logger_cfgs:window_lens', [int(num_steps_per_epoch/env_config['env_init_cfgs']['T'])])
+    # eg.add('logger_cfgs:window_lens', [int(num_steps_per_epoch/31)])
+    # eg.add('logger_cfgs:window_lens', [1])
     eg.add('seed', [0])
+
+    ## GPT
+    # eg.add('algo_cfgs', {'normalize_obs': False})
+
     eg.add('train_cfgs:device', ['cuda:0'])
+    eg.add('env_cfgs:env_init_cfgs:config_path', [cfg_path])
     # total experiment num must can be divided by num_pool
     # meanwhile, users should decide this value according to their machine
     eg.run(train, num_pool=1, gpu_id=gpu_id)
 
+    
     eg.analyze(parameter='algo', values=None, compare_num=1)
     #eg.render(num_episodes=1, render_mode='rgb_array', width=256, height=256)
     a = eg.evaluate(num_episodes=10)

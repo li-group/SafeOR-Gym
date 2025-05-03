@@ -1,6 +1,7 @@
 # --- powershell ---
 
-Set-Variable remoteIP "ec2-user@ec2-44-221-50-80.compute-1.amazonaws.com"
+# Set-Variable remoteIP "ec2-user@ec2-44-221-50-80.compute-1.amazonaws.com"
+Set-Variable remoteIP "ec2-user@ec2-3-237-14-210.compute-1.amazonaws.com"
 ssh -i "./akshdeep_safe.pem" $remoteIP
 
 # --- bash on the remote instance ---

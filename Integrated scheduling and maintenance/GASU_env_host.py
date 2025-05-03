@@ -21,6 +21,8 @@ import torch.nn.functional as F
 import os, sys
 from PIL import Image, ImageDraw, ImageFont
 import math
+from pathlib import Path
+import matplotlib.pyplot as plt
              
 # --- Plant Class ---
 class GASU(gym.Env):
@@ -84,6 +86,11 @@ class GASU(gym.Env):
             }
             Note: mttf, mttr, mntr \in Z  (set of integers)
     """
+    _CONFIG_SCHEMA = {
+        "demand": list,
+        "electricity_prices": list,
+        "compressors": list, 
+    }
 
     def __init__(self, env_id: str, **kwargs: Any) -> None:
         
@@ -100,16 +107,26 @@ class GASU(gym.Env):
         """
         # Processing the input arguments
         self.env_id = env_id
+        self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
         
         self.config_path = kwargs.get("config_path", None)
         if self.config_path is None:
             raise ValueError("config_path must be provided for MyEnv.")
         self.config_data = self._load_config() 
 
+        # Assign attributes like demand, electricity_prices
+        self.assign_env_config(self.config_data)
+
+        self.demand_array = np.array(self.config_data["demand"])
+        self.price_array = np.array(self.config_data["electricity_prices"])
+        self.compressors = self.config_data["compressors"]
+
         
         # First initialize the compressors
         self.compressors = {}
         self.initialize_compressors()
+        
+
 
         # Initialize the environment
         self.action_horizon = action_horizon
@@ -119,16 +136,17 @@ class GASU(gym.Env):
         self.state_horizon = state_horizon
         self.current_day = 0    # Start of Day: "current_day + 1"
         
-        self._initialize_simulation_data()
+        # self._initialize_simulation_data()
         self._initialize_observation_space()
         self._initialize_action_space()
         self._initialize_state()
+        self.get_external_purchase_price()
 
-        self.Penalty_maint_duration = 1 * 1e2
-        self.Penalty_maint_failure_time = 1 * 1e5
-        self.Penalty_early_maint = 1 * 1e5
-        self.Penalty_ramp = 1 * 1e5
-        self.Penalty_demand = 1 * 1e5
+        self.Penalty_maint_duration = 50
+        self.Penalty_maint_failure_time = 100
+        self.Penalty_early_maint = 75
+        self.Penalty_ramp = 1
+        self.Penalty_demand = 0.5
         
         self.terminated = False
         self.truncated = False
@@ -146,36 +164,95 @@ class GASU(gym.Env):
                              'Number of Demand-Unsatisfaction Violation': 0,
                              'Penalty of Demand-Unsatisfaction Violation': 0,
                             }
-        self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
+        # self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
+    
 
     def _load_config(self):
         with open(self.config_path, 'r') as f:
             return json.load(f)
+
+    def assign_env_config(self, kwargs):
+        print("Assigning configuration...")
+        print(len(kwargs), "kwargs")
+        for key, value in kwargs.items():
+            print(f"Trying to set {key} to {value!r}")
+            # 1) ensure it's in the schema
+            if key not in self._CONFIG_SCHEMA:
+                raise AttributeError(f"{self!r} has no config attribute '{key}'")
+            # 2) type‐check
+            expected_type = self._CONFIG_SCHEMA[key]
+            if not isinstance(value, expected_type):
+                raise TypeError(
+                    f"Config '{key}' expects type {expected_type.__name__}, "
+                    f"got {type(value).__name__}"
+                )
+            # 3) finally setattr
+            print(f"Setting {key} to {value!r}")
+            setattr(self, key, value)
         
     def _initialize_simulation_data(self):
         demand = self.config_data["demand"]
         electricity_prices = self.config_data["electricity_prices"]
 
-        import numpy as np
         self.demand_array = np.array(demand)
         self.price_array = np.array(electricity_prices)
 
-        return self.demand_array, self.price_array
+        # return self.demand_array, self.price_array
              
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         self.current_day = 0
-        self._initialize_state()
+        
         self.reward_ep = 0
         self.cost_ep = 0
+
+        self.cost = 0
+        self.reward = 0
+
         self.terminated = False 
         self.truncated = False
         self.info = {}
-        self.flatt_state = self.encode_observation(self.state)
-        flatt_state_tensor = th.tensor(self.flatt_state, device=self._device)
 
-        # OLD:  return self.flatt_state, {"dict_state": self.state, "terminated": self.terminated}
-        # ASHA: # return th.tensor(self.flatt_state).to(self._device), {"dict_state": self.state, "terminated": self.terminated, "truncated": self.truncated}
+        self._initialize_state()
+        self.flatt_state = self.encode_observation(self.state)
+        
+        flatt_state_tensor = th.tensor(self.flatt_state, dtype=th.float32, device=self._device)
+        # print("self.flatt_state_tensor from reset", flatt_state_tensor.shape)
+
         return flatt_state_tensor, {"dict_state": self.state, "terminated": self.terminated, "truncated": self.truncated}
+
+    # def _initialize_observation_space(self):
+        # self.max_mttr = max(comp.mttr for comp in self.compressors.values())
+        # self.total_capacity = sum(comp.capacity for comp in self.compressors.values())
+        # n = len(self.compressors)
+        # S = self.state_horizon
+
+        # self.observation_space = Dict({
+        #     "demand": Box(
+        #         low=0.0,
+        #         high=self.total_capacity * 10,
+        #         shape=(S,),
+        #         dtype=np.float32
+        #     ),
+        #     "electricity_price": Box(
+        #         low=0.0,
+        #         high=10.0,
+        #         shape=(S,),
+        #         dtype=np.float32
+        #     ),
+        #     "TLCM": Box(  # Time Left to Complete Maintenance (days)
+        #         low=0.0,
+        #         high=self.max_mttr,
+        #         shape=(n,),
+        #         dtype=np.float32
+        #     ),
+        #     "TSLM": Box(  # Time Since Last Maintenance (days)
+        #         low=0.0,
+        #         high=100.0,
+        #         shape=(n,),
+        #         dtype=np.float32
+        #     ),
+        #     "CDM": MultiBinary(n)  # Can Do Maintenance: binary mask
+        # })
 
     def _initialize_observation_space(self):
         self.max_mttr = max(comp.mttr for comp in self.compressors.values())
@@ -183,42 +260,64 @@ class GASU(gym.Env):
         n = len(self.compressors)
         S = self.state_horizon
 
-        self.observation_space = Dict({
-            "demand": Box(
-                low=0.0,
-                high=self.total_capacity * 10,
-                shape=(S,),
-                dtype=np.float32
-            ),
-            "electricity_price": Box(
-                low=0.0,
-                high=10.0,
-                shape=(S,),
-                dtype=np.float32
-            ),
-            "TLCM": Box(  # Time Left to Complete Maintenance (days)
-                low=0.0,
-                high=self.max_mttr,
-                shape=(n,),
-                dtype=np.float32
-            ),
-            "TSLM": Box(  # Time Since Last Maintenance (days)
-                low=0.0,
-                high=100.0,
-                shape=(n,),
-                dtype=np.float32
-            ),
-            "CDM": MultiBinary(n)  # Can Do Maintenance: binary mask
-        })
+        # Compute the total observation dimension
+        # obs_dim = S * 2 + n * 3  # demand, electricity_price, TLCM, TSLM, CDM
+        self.reset()
+        # obs_dim = self.flatt_state.shape[0]
+        obs_dim = self.flatt_state.shape
+
+        # Define lower and upper bounds for each component
+        low = np.array(
+            [0.0] * S +                        # demand
+            [0.0] * S +                        # electricity_price
+            [0.0] * n +                        # TLCM
+            [0.0] * n +                        # TSLM
+            [0.0] * n                          # CDM (binary)
+        )
+        high = np.array(
+            [self.total_capacity * 10] * S +   # demand
+            [10.0] * S +                       # electricity_price
+            [self.max_mttr] * n +              # TLCM
+            [100.0] * n +                      # TSLM
+            [1.0] * n                          # CDM
+        )
+
+        # high_dim = high.shape[0]
+        # low_dim = low.shape[0]
+
+        # Set observation space as a flat Box
+        # self.observation_space = Box(
+        #     low=low,
+        #     high=high, 
+        #     shape=(obs_dim,),
+        #     dtype=np.float32
+        # )
+        self.observation_space = Box(
+            low=0,
+            high=1000, 
+            # shape=(obs_dim,),
+            shape=(69,),
+            dtype=np.float32
+        )
+
+
 
     def _initialize_action_space(self):
         n = len(self.compressors)
         
+        self.max_capacity = max(comp.capacity for comp in self.compressors.values())
+        self.max_purchase_quantity = self.max_capacity 
         # Create lower and upper bounds
         low = np.array([0] * n + [0.0] * n + [0.0], dtype=np.float32)          # maintenance (0), production (0), purchase (0)
-        high = np.array([1] * n + [1.0] * n + [10000.0], dtype=np.float32)     # maintenance (1), production (1), purchase (10000)
+        # high = np.array([1] * n + [1.0] * n + [10000.0], dtype=np.float32)     # maintenance (1), production (1), purchase (10000)
+        high = np.array([1] * n + [1.0] * n + [1.0], dtype=np.float32)            # maintenance (1), production (1), purchase (1)
 
-        self.action_space = Box(low=low, high=high, dtype=np.float32)
+        high_dim = high.shape[0]
+
+        self.action_space = Box(low=low,
+        high=high, 
+        shape=(high_dim,),
+        dtype=np.float32)
 
         '''
         REMARKS:
@@ -320,7 +419,7 @@ class GASU(gym.Env):
             cost += ramp_cost
 
         # Add external purchase cost
-        cost += action["external_purchase"][0] * self.external_purchase_price
+        cost += action["external_purchase"][0] * self.external_purchase_price * self.max_purchase_quantity
         return cost
     
     def maintenance_duration_penalty(self, action):
@@ -339,7 +438,7 @@ class GASU(gym.Env):
             elif maint_action[i] == 1 and tlcm[i] == 0 and (tslm[i] == 0):
                 penalty += self.Penalty_maint_duration * math.exp(tlcm[i])            
             elif tlcm[i] < 0 and maint_action[i] == 1:
-                penalty += -self.Penalty_maint_duration * math.exp(tlcm[i])
+                penalty += self.Penalty_maint_duration * math.exp(-tlcm[i])
 
         if penalty > 0:
             self.env_spec_log['Number of Maintenance-Duration Violation'] += 1
@@ -395,7 +494,7 @@ class GASU(gym.Env):
 
             # Penalize if compressor is under maintenance AND producing
             if maintenance_actions[i] == 1 and production_quantity > 0:
-                penalty += self.Penalty_ramp * production_quantity
+                penalty += self.Penalty_ramp * production_quantity/10
 
         if penalty > 0:
             self.env_spec_log['Number of Ramping-in-Maintenance Violation'] += 1
@@ -412,7 +511,7 @@ class GASU(gym.Env):
             production += action["production_rate"][i] * comp.capacity
 
         # External purchase
-        ext_purchase = action["external_purchase"][0]
+        ext_purchase = action["external_purchase"][0]* self.max_purchase_quantity
 
         # Total supply
         total_supplied = production + ext_purchase
@@ -421,8 +520,16 @@ class GASU(gym.Env):
         demand_today = self.demand_array[self.current_day]
 
         # Apply penalty if demand not met exactly
-        if abs(demand_today - total_supplied) > 10:
+         
+        if abs(demand_today - total_supplied) > 10:    # OLD--> Absolute error 
+        # if abs(demand_today - total_supplied) > 100:    # OLD--> Absolute error 
+        # # if abs(demand_today - total_supplied)/demand_today > 0.1:    # NEW--> Relative error: 10% of demand
+        #     penalty = self.Penalty_demand * abs(demand_today - total_supplied)/10
+        # elif abs(demand_today - total_supplied) > 10 and abs(demand_today - total_supplied) <= 100:
+        #     penalty = self.Penalty_demand * abs(demand_today - total_supplied)
+        # elif abs(demand_today - total_supplied) > 1 and abs(demand_today - total_supplied) <= 10:
             penalty = self.Penalty_demand * abs(demand_today - total_supplied)
+
 
         if penalty > 0:
             self.env_spec_log['Number of Demand-Unsatisfaction Violation'] += 1
@@ -439,7 +546,7 @@ class GASU(gym.Env):
         n_comp = len(comp_ids)
         maintenance_action = action["maintenance_action"]
         production_rate = action["production_rate"]
-        external_purchase = action["external_purchase"][0]
+        external_purchase = action["external_purchase"][0] * self.max_purchase_quantity
 
         for i, cid in enumerate(comp_ids):
             comp = self.compressors[cid]
@@ -472,6 +579,10 @@ class GASU(gym.Env):
         production_rate = action[n:2*n]
         external_purchase = action[-1:]  # keeps it as shape (1,)
 
+        epsilon = 0.01
+        production_rate = np.where(np.abs(production_rate) < epsilon, 0.0, production_rate)
+        external_purchase = np.where(np.abs(external_purchase) < epsilon, 0.0, external_purchase)
+
         return {
             "maintenance_action": maintenance_action,
             "production_rate": production_rate,
@@ -488,12 +599,22 @@ class GASU(gym.Env):
         tlcm = np.array(state["TLCM"], dtype=np.float32)                            # shape (n,)
         tslm = np.array(state["TSLM"], dtype=np.float32)                            # shape (n,)
         cdm = np.array(state["CDM"], dtype=np.float32)                              # shape (n,), encoded as float
-        flatt_state = np.concatenate([demand, electricity_price, tlcm, tslm, cdm])
+        flatt_state = np.concatenate([demand, electricity_price, tlcm, tslm, cdm]).astype("float32")
+
+        # print("flatt_state shape ", flatt_state.shape)
+
+        # print("flatt_state shap [0]", flatt_state.shape[0])
         
         return flatt_state
 
     def step(self, raw_action):
         truncated = False
+
+        if isinstance(raw_action, torch.Tensor):
+            raw_action = raw_action.to(self._device)
+            action = raw_action.cpu().numpy()
+        else:
+            action = raw_action
 
         action = raw_action.numpy() if torch.is_tensor(raw_action) else raw_action
         
@@ -537,12 +658,19 @@ class GASU(gym.Env):
         if self.current_day == self.T:       # one month (31 days)
             self.terminated = True                 # end of episode
     
-        # OLD
+        
         # return self.flatt_state, self.reward - self.cost, self.done, truncated, self.info
 
+        # print("self.flatt_state", self.state)
+
         self.flatt_state = self.encode_observation(self.state)
-        flatt_state_tensor = th.tensor(self.flatt_state, device=self._device)
-        return flatt_state_tensor, th.tensor(reward-cost, device=self._device), th.tensor(self.terminated, device=self._device), th.tensor(self.truncated, device=self._device), {}
+        flatt_state_tensor = th.tensor(self.flatt_state, dtype = th.float32, device=self._device)
+
+        # print( "self.flatt_state_tensor from step", flatt_state_tensor.shape)
+
+        # print(f"[DEBUG] step returns obs shape: {flatt_state_tensor.shape}")
+
+        return flatt_state_tensor, th.tensor(reward-cost, dtype = th.float32, device=self._device), th.tensor(self.terminated, dtype = th.bool, device=self._device), th.tensor(self.truncated, dtype = th.bool, device=self._device), {}
 
     def _get_state(self, mode):
         if mode == 'dict':
@@ -616,7 +744,7 @@ class GASU(gym.Env):
     
     def plot_complete_simulation_data(self):
         # Simulate and plot both in a single figure
-        import matplotlib.pyplot as plt
+        # import matplotlib.pyplot as plt
         # Create a figure with two subplots
         fig, axes = plt.subplots(2, 1, figsize=(12, 8))
 
@@ -651,7 +779,7 @@ class GASU(gym.Env):
 # --- Compressor Class ---
 class Compressor:
     def __init__(self, comp_id, capacity, specific_energy, mttf, mttr, mntr, TLCM, TSLM, CDM):
-        self.scale = 750 #1000
+        self.scale = 1000
         self.comp_id = comp_id
         self.capacity = capacity
         self.specific_energy = specific_energy/self.scale
@@ -689,3 +817,41 @@ class Compressor:
             f"TSLM: {self.TSLM} "
             f"CDM: {self.CDM} "
         )
+
+
+def main():
+    base_dir   = Path(__file__).resolve().parent
+    config_fp  = base_dir / "gasu_config.json"
+    if not config_fp.is_file():
+        raise FileNotFoundError(f"Couldn’t find config.json at {config_fp}")
+    # 1) load & preprocess your JSON config
+    # config = load_config("/Users/skompall/Project Files/OR Gym/config.json")
+    # 2) instantiate
+    env = GASU(env_id='GASU-v0', config_path= config_fp)
+    # 3) reset returns (obs_tensor, info_dict)
+    obs, info = env.reset()
+    print("Manual rollout start...")
+
+    # for i in range(3):
+    i = 1
+    done = False
+    while not done:
+        # 4) sample action (still a NumPy array)
+        action = env.action_space.sample()
+        # 5) step returns
+        #    (state_tensor, reward_tensor, done_tensor, truncated_tensor, info_dict)
+        obs, reward, done, truncated, info = env.step(action)
+
+        # print(f"obs shape{i}", obs.shape)
+
+        # 6) you can still do:
+        print(f"Step {i}, obs shape={obs.shape}, reward={reward}, done={done}")
+
+
+        # 7) checking `done` on a scalar BoolTensor works:
+        if done:
+            obs, info = env.reset()
+            print("Episode reset")
+        i += 1
+if __name__ == "__main__":
+    main()
