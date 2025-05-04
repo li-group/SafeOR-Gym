@@ -107,6 +107,11 @@ class UnitCommitmentMasterEnv(gym.Env):
                              'Penalty of Ramping Down Violation': 0,
                              # 'Number of Irreparable Violation': 0,
                              # 'Penalty of Irreparable Violation': 0,
+                             'debug: production cost': 0,
+                             'debug: start-up cost': 0,
+                            'debug: shut-down cost': 0,
+                             'debug: load shedding cost': 0,
+                            'debug: reserve cost': 0,
                              }
 
         self.penalty_factor_UT = 100
@@ -210,7 +215,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.R = 10
 
         # default initial values for physical state variables
-        self.scale_action = False
+        self.scale_action = True
         self.no_change_before_0 = True
         self.u_seq = self.u0_seq = {0: np.ones(8 + 1),  # assume only 1st generator is on
                                     1: np.zeros(5 + 1),
@@ -547,11 +552,18 @@ class UnitCommitmentMasterEnv(gym.Env):
         overflow, underflow = self._compute_power_slack(p_new, flow, demand)
 
         # compute the reward
-        reward += self._compute_production_reward(p_new)
-        reward += self._compute_startup_reward(v_new)
-        reward += self._compute_shutdown_reward(w_new)
-        reward += self._compute_fulfillment_reward(overflow, underflow)
-        reward += self._compute_reservation_reward(reserve)
+        production_reward = self._compute_production_reward(p_new)
+        startup_reward = self._compute_startup_reward(v_new)
+        shutdown_reward = self._compute_shutdown_reward(w_new)
+        load_shedding_reward = self._compute_fulfillment_reward(overflow, underflow)
+        reserve_shortfall_reward = self._compute_reservation_reward(reserve)
+        reward = (production_reward + startup_reward + shutdown_reward +
+                        load_shedding_reward + reserve_shortfall_reward)
+        self.env_spec_log['debug: production cost'] += production_reward
+        self.env_spec_log['debug: start-up cost'] += startup_reward
+        self.env_spec_log['debug: shut-down cost'] += shutdown_reward
+        self.env_spec_log['debug: load shedding cost'] += load_shedding_reward
+        self.env_spec_log['debug: reserve cost'] += reserve_shortfall_reward
         return reward
 
     def _compute_cost(self, on_off: np.ndarray, power: np.ndarray) -> np.int64:
@@ -595,7 +607,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             action_low = {key: np.array(value) for key, value in self.action_low.items()}
             action_high = {key: np.array(value) for key, value in self.action_high.items()}
 
-        on_off_rounded = (on_off >= 0).float() if torch.is_tensor(on_off) else (on_off >= 0).astype(float)
+        on_off_rounded = (on_off >= 0.5).float() if torch.is_tensor(on_off) else (on_off >= 0.5).astype(float)
         power_scaled = (power + 1) / 2 * (action_high["power"] - action_low["power"]) + action_low["power"]
         angle_scaled = (angle + 1) / 2 * (action_high["angle"] - action_low["angle"]) + action_low["angle"]
         return on_off_rounded, power_scaled, angle_scaled
@@ -731,10 +743,18 @@ def assign_env_config(self, kwargs):
             else:
                 raise AttributeError(f"{self} has no attribute, {key}")
 
+# import pickle
+# with open('../algorithms/optimal_action_UC-v0.pkl', 'rb') as f:
+#     opt_action_v0 = pickle.load(f)
+# actions = []
+# for t in range(1, 25):
+#     print(f"Time {t}: {[opt_action_v0['on_off'][(t, i)]for i in range(5)]}, Power: {[opt_action_v0['power'][(t, i)] for i in range(5)]}")
+#     actions.append([opt_action_v0['on_off'][(t, i)] for i in range(5)] +
+#                       [opt_action_v0['power'][(t, i)] for i in range(5)])
+# actions = np.array(actions)
 #
 # env = UnitCommitmentMasterEnv(env_id='UC-v0')
 # state = env.reset()
-# actions = np.load("./opt_action_v0_arr.npy")
 # total = 0
 # for action in actions:
 #     state, reward, terminated, truncated, info = env.step(action)
