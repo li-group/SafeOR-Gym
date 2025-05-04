@@ -607,7 +607,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             action_low = {key: np.array(value) for key, value in self.action_low.items()}
             action_high = {key: np.array(value) for key, value in self.action_high.items()}
 
-        on_off_rounded = (on_off >= 0.5).float() if torch.is_tensor(on_off) else (on_off >= 0.5).astype(float)
+        on_off_rounded = (on_off >= 0).float() if torch.is_tensor(on_off) else (on_off >= 0).astype(float)
         power_scaled = (power + 1) / 2 * (action_high["power"] - action_low["power"]) + action_low["power"]
         angle_scaled = (angle + 1) / 2 * (action_high["angle"] - action_low["angle"]) + action_low["angle"]
         return on_off_rounded, power_scaled, angle_scaled
