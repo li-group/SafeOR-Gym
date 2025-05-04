@@ -113,7 +113,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.penalty_factor_DT = 100
         self.penalty_factor_RampUp = 100
         self.penalty_factor_RampDown = 100
-        self.penalty_factor_irreparable = 1000000
+        # self.penalty_factor_irreparable = 1000000
 
         self.T = 24
         self._max_episode_steps = self.T
@@ -444,7 +444,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         u_new = on_off
         u_curr = self.u
         v_new, w_new = self._reckless_move(u_new, u_curr)
-        p_new = u_new * power
+        p_new = power
         p_curr = self.p
         pi_new = angle
 
@@ -455,14 +455,14 @@ class UnitCommitmentMasterEnv(gym.Env):
         # must_on = p_curr > self.SD
         # contradiction = must_on & must_off
 
-        # # repair part of the action
-        # repaired_pi_new = np.minimum(np.maximum(pi_new, self.Pi_min), self.Pi_max)
-        # # the decision, on, implies turn-on and violates DT, so must keep it off
-        # # the decision, off, implies turn-off and violates UT, so must keep it on
-        # UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
-        # repaired_u_new = np.where(DT_violation, 0, np.where(UT_violation, 1, u_new))
-        # repaired_v_new, repaired_w_new = self._reckless_move(repaired_u_new, u_curr)
-        #
+        # repair part of the action
+        repaired_pi_new = np.minimum(np.maximum(pi_new, self.Pi_min), self.Pi_max)
+        # the decision, on, implies turn-on and violates DT, so must keep it off
+        # the decision, off, implies turn-off and violates UT, so must keep it on
+        UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
+        repaired_u_new = np.where(DT_violation, 0, np.where(UT_violation, 1, u_new))
+        repaired_v_new, repaired_w_new = self._reckless_move(repaired_u_new, u_curr)
+
         # if np.any(contradiction):
         #     # self.truncated = True # DON'T TRUNCATE EVEN THOUGH WE CANNOT REPAIR THE ACTION
         #     repaired_p_new = u_new * np.minimum(np.maximum(p_new, self.P_min), self.P_max)
@@ -480,7 +480,12 @@ class UnitCommitmentMasterEnv(gym.Env):
         #     lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
         #     repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
         # return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_pi_new
-        return u_new, v_new, w_new, p_new, pi_new
+        # return u_new, v_new, w_new, p_new, pi_new
+
+        ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
+        lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
+        repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
+        return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_pi_new
 
     def _compute_reserve(self, u_new: np.ndarray,
                          v_new: np.ndarray, w_new: np.ndarray, p_new: np.ndarray) -> np.ndarray:

@@ -83,5 +83,8 @@ class UCMILPSolver(BaseMILPSolver):
 #         env = UnitCommitmentMasterEnv(env_id=env_id)
 #         solver = UCMILPSolver(env, solve_horizon=24, solver_verbose=False)
 #         opt_action = solver.get_action(None)
+#         # save the json
+#         with open(f'optimal_action_{env_id}.pkl', 'wb') as f:
+#             pickle.dump(opt_action, f)
 #         print(f"Optimal Action {env_id}:\n\n", opt_action)
 #         print(f"Objective Value {env_id}:\n\n", opt_action['objective'])

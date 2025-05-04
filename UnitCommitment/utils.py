@@ -318,6 +318,10 @@ def init_model(args, data):
 #     data = None  # Replace with actual data if needed
 #     model = init_model(args_instance, data)
 #
+#     solver = pe.SolverFactory("gurobi")
+#     solver.options['NonConvex'] = 2
+#     results = solver.solve(model, False)
+#
 #     action = {'on_off': {}, 'power': {}, 'angle': {}}
 #     action_arr = np.zeros((24, 5+5+3))
 #     for t in range(1, 25):
@@ -329,37 +333,9 @@ def init_model(args, data):
 #         for n in range(1, 4):
 #             action['angle'][t, n] = model.pi[t, n].value
 #             action_arr[t-1, 9 + n] = model.pi[t, n].value
-#     #     print(f"step {t}")
-#     #     print(f"production cost: {model.production_cost[t].value}")
-#     #     print(f"startup cost: {model.startup_cost[t].value}")
-#     #     print(f"shutdown cost: {model.shutdown_cost[t].value}")
-#     #     print(f"load shedding cost: {model.load_shedding_cost[t].value}")
-#     #     print(f"reserve penalty cost: {model.reserve_penalty_cost[t].value}")
-#     #     print(f"total cost: {model.total_cost[t].value}")
 #     # save action arr
 #     np.save('opt_action_v1_arr.npy', action_arr)
 #     print(f"optimal cost v1: {model.obj()}")
-#
-#     # states = []
-#     # for t in range(1, 25):
-#     #     state = {"u_seq": {},
-#     #              "D_forecast": {},
-#     #              "p": {},
-#     #              "pi": {}}
-#     #     for i in range(5):
-#     #         state["u_seq"][i] = model.u[t, i].value
-#     #         state["p"][i] = model.p[t, i].value
-#     #     for n in range(4):
-#     #         state["D_forecast"][n] = model.demand[t, n].value
-#     #         state["pi"][n] = model.pi[t, n].value
-#     #     states.append(state)
-#     # for t in range(24):
-#     #     state = states[t]
-#     #     print(f"step {t}")
-#     #     print(f"u: {state['u_seq']}")
-#     #     print(f"D_forecast: {state['D_forecast']}")
-#     #     print(f"p: {state['p']}")
-#     #     print(f"pi: {state['pi']}")
 #
 #     args_instance = args(env_id='UC-v0')
 #     data = None  # Replace with actual data if needed
