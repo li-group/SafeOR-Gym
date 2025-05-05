@@ -105,6 +105,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                              'Penalty of Ramping Up Violation': 0,
                              'Number of Ramping Down Violation': 0,
                              'Penalty of Ramping Down Violation': 0,
+                             'Penalty of Load Shedding': 0,
                              # 'Number of Irreparable Violation': 0,
                              # 'Penalty of Irreparable Violation': 0,
                              'debug: production cost': 0,
@@ -215,7 +216,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.R = 10
 
         # default initial values for physical state variables
-        self.scale_action = True
+        self.scale_action = False
         self.no_change_before_0 = True
         self.u_seq = self.u0_seq = {0: np.ones(8 + 1),  # assume only 1st generator is on
                                     1: np.zeros(5 + 1),
@@ -532,7 +533,8 @@ class UnitCommitmentMasterEnv(gym.Env):
         return - np.sum(self.C_SD * w_new)
 
     def _compute_fulfillment_reward(self, overflow, underflow):
-        return - self.C_LS * np.sum(overflow + underflow)
+        # return - self.C_LS * np.sum(overflow + underflow)
+        return - self.C_LS * np.sum(underflow)
 
     def _compute_reservation_reward(self, reserve):
         return - self.C_RP * np.maximum(self.R - np.sum(reserve), 0)
@@ -559,6 +561,11 @@ class UnitCommitmentMasterEnv(gym.Env):
         reserve_shortfall_reward = self._compute_reservation_reward(reserve)
         reward = (production_reward + startup_reward + shutdown_reward +
                         load_shedding_reward + reserve_shortfall_reward)
+        print(f"Production Reward: {production_reward}, "
+              f"Startup Reward: {startup_reward}, "
+              f"Shutdown Reward: {shutdown_reward}, "
+              f"Load Shedding Reward: {load_shedding_reward}, "
+              f"Reserve Shortfall Reward: {reserve_shortfall_reward}")
         self.env_spec_log['debug: production cost'] += production_reward
         self.env_spec_log['debug: start-up cost'] += startup_reward
         self.env_spec_log['debug: shut-down cost'] += shutdown_reward
@@ -566,12 +573,14 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.env_spec_log['debug: reserve cost'] += reserve_shortfall_reward
         return reward
 
-    def _compute_cost(self, on_off: np.ndarray, power: np.ndarray) -> np.int64:
+    def _compute_cost(self, on_off: np.ndarray, power: np.ndarray, angle: np.ndarray,
+                      demand: np.ndarray) -> np.int64:
         u_new = on_off
         u_curr = self.u
         v_new, w_new = self._reckless_move(u_new, u_curr)
         p_new = u_new * np.minimum(np.maximum(power, self.P_min), self.P_max)
         p_curr = self.p
+        pi_new = angle
 
         # compute cost (raw action)
         UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
@@ -579,6 +588,13 @@ class UnitCommitmentMasterEnv(gym.Env):
                                                                                                p_new, p_curr,
                                                                                                v_new, w_new)
         cost = UT_cost + DT_cost + RampUp_cost + RampDown_cost
+
+        # # compute the flow
+        # flow = self._compute_power_flow(pi_new)
+        # # compute the power slack
+        # overflow, underflow = self._compute_power_slack(p_new, flow, demand)
+        # load_shedding_cost = - self._compute_fulfillment_reward(overflow, underflow)
+        # cost += load_shedding_cost
 
         # log the violation and cost
         self.env_spec_log['Number of Minimum Up-time Violation'] += np.sum(UT_violation)
@@ -642,7 +658,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         # now they are at the same time step, t+1
 
         # compute the cost of raw action
-        self.cost += self._compute_cost(on_off, power)
+        self.cost += self._compute_cost(on_off, power, angle, demand)
 
         # repair the action (may fail to repair -> use the partially repaired action and add a large cost)
         # Note the _repair_action function will also update the cost inside the function if irreparable
@@ -752,7 +768,6 @@ def assign_env_config(self, kwargs):
 #     actions.append([opt_action_v0['on_off'][(t, i)] for i in range(5)] +
 #                       [opt_action_v0['power'][(t, i)] for i in range(5)])
 # actions = np.array(actions)
-#
 # env = UnitCommitmentMasterEnv(env_id='UC-v0')
 # state = env.reset()
 # total = 0
@@ -760,10 +775,19 @@ def assign_env_config(self, kwargs):
 #     state, reward, terminated, truncated, info = env.step(action)
 #     total += reward
 # print("Total Reward v0:", total)
+# #
 #
+# with open('../algorithms/optimal_action_UC-v1.pkl', 'rb') as f:
+#     opt_action_v1 = pickle.load(f)
+# actions = []
+# for t in range(1, 25):
+#     print(f"Time {t}: {[opt_action_v1['on_off'][(t, i)]for i in range(5)]}, Power: {[opt_action_v1['power'][(t, i)] for i in range(5)]}")
+#     actions.append([opt_action_v1['on_off'][(t, i)] for i in range(5)] +
+#                       [opt_action_v1['power'][(t, i)] for i in range(5)] +
+#                    [opt_action_v1['angle'][(t, i)] for i in range(1,4)])
+# actions = np.array(actions)
 # env = UnitCommitmentMasterEnv(env_id='UC-v1')
 # state = env.reset()
-# actions = np.load("./opt_action_v1_arr.npy")
 # total = 0
 # for t, action in enumerate(actions):
 #     state, reward, terminated, truncated, info = env.step(action)
