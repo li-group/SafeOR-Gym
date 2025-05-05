@@ -105,7 +105,6 @@ class UnitCommitmentMasterEnv(gym.Env):
                              'Penalty of Ramping Up Violation': 0,
                              'Number of Ramping Down Violation': 0,
                              'Penalty of Ramping Down Violation': 0,
-                             'Penalty of Load Shedding': 0,
                              # 'Number of Irreparable Violation': 0,
                              # 'Penalty of Irreparable Violation': 0,
                              'debug: production cost': 0,
