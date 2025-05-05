@@ -256,7 +256,8 @@ def init_model(args, data):
         return m.shutdown_cost[t] == sum(m.w[t, i] * m.C_SD[i] for i in m.generators)
 
     def load_shedding_cost_rule(m, t):
-        return m.load_shedding_cost[t] == sum(m.C_LS * (m.s_pos[t, n] + m.s_neg[t, n]) for n in m.buses)
+        #return m.load_shedding_cost[t] == sum(m.C_LS * (m.s_pos[t, n] + m.s_neg[t, n]) for n in m.buses)
+        return m.load_shedding_cost[t] == sum(m.C_LS * (m.s_pos[t, n]) for n in m.buses)
 
     def reserve_penalty_cost_rule(m, t):
         return m.reserve_penalty_cost[t] == m.C_RP * m.sr[t]
