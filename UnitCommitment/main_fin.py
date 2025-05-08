@@ -236,30 +236,37 @@ def recurse(eg, current, path=[], ):
 if __name__ == '__main__':
     debug_use = True
 
-    eg = ExperimentGrid(exp_name='Benchmark_UC3')
+    eg = ExperimentGrid(exp_name='Benchmark_Full_UC1')
 
     if debug_use == True:
-        base_policy = []
-        naive_lagrange_policy = []
-        first_order_policy = []
+        base_policy = ['PPO']
+        naive_lagrange_policy = ['TRPOLag']
+        first_order_policy = ['P3O', 'OnCRPO']
         second_order_policy = ['CPO']
-        episodes_per_epoch = 3
+        off_policy = ['DDPGLag']
+        episodes_per_epoch = 2
         steps_per_epoch = [24*episodes_per_epoch]
-        total_steps = [24*episodes_per_epoch*5]
-        num_episodes = 10
+        total_steps = [24*episodes_per_epoch*2]
+        num_episodes = 2
 
     else:
-        base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
-        naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
-        first_order_policy = ['CUP', 'FOCOPS', 'P3O']
-        second_order_policy = ['CPO', 'PCPO']
+        base_policy = ['PPO']
+        naive_lagrange_policy = ['TRPOLag']
+        first_order_policy = ['P3O', 'OnCRPO']
+        second_order_policy = ['CPO']
+        off_policy = ['DDPGLag']
+        # base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
+        # naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
+        # first_order_policy = ['CUP', 'FOCOPS', 'P3O']
+        # second_order_policy = ['CPO', 'PCPO']
+        # off_policy = ['DDPGLag']
         episodes_per_epoch = 30
         steps_per_epoch = [24 * episodes_per_epoch]
         total_steps = [24 * episodes_per_epoch * 500]
         num_episodes = 10
 
     window_lens = [episodes_per_epoch]
-    algos = base_policy + naive_lagrange_policy + first_order_policy + second_order_policy
+    algos = base_policy + naive_lagrange_policy + first_order_policy + second_order_policy + off_policy
     num_pool = len(algos)
     compare_num = len(algos)
 
@@ -287,15 +294,12 @@ if __name__ == '__main__':
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
 
-    # # env_config does not accept array, here I use the default config in env
     eg.add('env_cfgs:env_init_config:scale_action', [True])
-    eg.add('env_cfgs:env_init_config:penalty_factor_UT', [10])
-    eg.add('env_cfgs:env_init_config:penalty_factor_DT', [10])
-    eg.add('env_cfgs:env_init_config:penalty_factor_RampUp', [10])
-    eg.add('env_cfgs:env_init_config:penalty_factor_RampDown', [10])
-    eg.add('env_cfgs:env_init_config:penalty_factor_irreparable', [10])
+    eg.add('env_cfgs:env_init_config:penalty_factor_UT', [1.])
+    eg.add('env_cfgs:env_init_config:penalty_factor_DT', [1.])
+    eg.add('env_cfgs:env_init_config:penalty_factor_RampUp', [0.1])
+    eg.add('env_cfgs:env_init_config:penalty_factor_RampDown', [0.1])
 
-    # recurse(eg, env_config)
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
     eg.add('algo_cfgs:steps_per_epoch', steps_per_epoch)
     eg.add('train_cfgs:total_steps', total_steps)
@@ -306,7 +310,6 @@ if __name__ == '__main__':
     eg.run(train, num_pool=num_pool, gpu_id=gpu_id)
 
     eg.analyze(parameter='algo', values=None, compare_num=compare_num)
-    # eg.render(num_episodes=1, render_mode='rgb_array', width=256, height=256)
     eg.evaluate(num_episodes=num_episodes)
 
     print(dir(eg))

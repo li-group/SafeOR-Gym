@@ -107,6 +107,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                              'Penalty of Ramping Down Violation': 0,
                              # 'Number of Irreparable Violation': 0,
                              # 'Penalty of Irreparable Violation': 0,
+                             "debug: underflow in total": 0,
                              'debug: production cost': 0,
                              'debug: start-up cost': 0,
                             'debug: shut-down cost': 0,
@@ -192,7 +193,7 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         # default forecast
         self.model_type = 'deterministic'
-        self.nyiso_path = "./or_gym/envs/power_system/" + 'data/'
+        self.forecast_length = 8
 
         # default information
         self.P_max = np.array([455, 130, 130, 80, 55])
@@ -234,9 +235,9 @@ class UnitCommitmentMasterEnv(gym.Env):
         assign_env_config(self, kwargs)
 
         # initialize belief model/data
-        self.D_forecast = np.zeros(self.num_bus)
-        self.forecast_model = ForecastModel(self.model_type, self.loc, self.scale, self.num_bus,
-                                            self.deterministic_demand, self.nyiso_path)
+        self.D_forecast = np.zeros((self.forecast_length, self.num_bus))
+        self.forecast_model = ForecastModel(self.model_type, self.loc, self.scale, self.num_bus, self.forecast_length,
+                                            self.deterministic_demand)
 
         self.reset()
 
@@ -256,7 +257,9 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.raw_observation_space = gym.spaces.Dict(
                 {
                     "u_seq": gym.spaces.MultiBinary((np.maximum(self.UT, self.DT) + 1).sum()),
-                    "D_forecast": gym.spaces.Box(low=0, high=np.ones(self.num_bus) * self.P_max.sum(), dtype=np.float32),
+                    "D_forecast": gym.spaces.Box(low=0,
+                                                 high=np.ones(self.num_bus * self.forecast_length) * self.P_max.sum(),
+                                                 dtype=np.float32),
                     "p": gym.spaces.Box(low=0, high=self.P_max, dtype=np.float32)
                 })
             self.observation_space = flatten_space(self.raw_observation_space)
@@ -279,7 +282,9 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.raw_observation_space = gym.spaces.Dict(
                 {
                     "u_seq": gym.spaces.MultiBinary((np.maximum(self.UT, self.DT) + 1).sum()),
-                    "D_forecast": gym.spaces.Box(low=0, high=np.ones(self.num_bus) * self.P_max.sum(), dtype=np.float32),
+                    "D_forecast": gym.spaces.Box(low=0,
+                                                 high=np.ones(self.num_bus * self.forecast_length) * self.P_max.sum(),
+                                                 dtype=np.float32),
                     "p": gym.spaces.Box(low=0, high=self.P_max, dtype=np.float32),
                     "pi": gym.spaces.Box(low=self.Pi_min, high=self.Pi_max, dtype=np.float32)
                 })
@@ -313,7 +318,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                 "p": self.p,
             }
             obs_arr = np.concatenate([self._vectorize_seq(self.u_seq),
-                                      self.D_forecast,
+                                      self.D_forecast.reshape(-1),
                                       self.p])
         elif self.env_id == 'UC-v1':
             obs_dict = {
@@ -323,7 +328,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                 "pi": self.pi
             }
             obs_arr = np.concatenate([self._vectorize_seq(self.u_seq),
-                                      self.D_forecast,
+                                      self.D_forecast.reshape(-1),
                                       self.p,
                                       self.pi])
         else:
@@ -518,8 +523,8 @@ class UnitCommitmentMasterEnv(gym.Env):
         flow_out = np.array([np.sum(flow[self.from_bus_lines[b]]) for b in self.buses])
         flow_diff = flow_in - flow_out
         s = demand - np.array([np.sum(p_new[self.bus_gen[b]]) for b in self.buses]) - flow_diff
-        overflow = np.maximum(0, s)
-        underflow = - np.minimum(0, s)
+        underflow = np.maximum(0, s)
+        overflow = - np.minimum(0, s)
         return overflow, underflow
 
     def _compute_production_reward(self, p_new):
@@ -532,7 +537,6 @@ class UnitCommitmentMasterEnv(gym.Env):
         return - np.sum(self.C_SD * w_new)
 
     def _compute_fulfillment_reward(self, overflow, underflow):
-        # return - self.C_LS * np.sum(overflow + underflow)
         return - self.C_LS * np.sum(underflow)
 
     def _compute_reservation_reward(self, reserve):
@@ -551,6 +555,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         flow = self._compute_power_flow(pi_new)
         # compute the power slack
         overflow, underflow = self._compute_power_slack(p_new, flow, demand)
+        self.env_spec_log['debug: underflow in total'] += np.sum(underflow)
 
         # compute the reward
         production_reward = self._compute_production_reward(p_new)
@@ -560,11 +565,6 @@ class UnitCommitmentMasterEnv(gym.Env):
         reserve_shortfall_reward = self._compute_reservation_reward(reserve)
         reward = (production_reward + startup_reward + shutdown_reward +
                         load_shedding_reward + reserve_shortfall_reward)
-        print(f"Production Reward: {production_reward}, "
-              f"Startup Reward: {startup_reward}, "
-              f"Shutdown Reward: {shutdown_reward}, "
-              f"Load Shedding Reward: {load_shedding_reward}, "
-              f"Reserve Shortfall Reward: {reserve_shortfall_reward}")
         self.env_spec_log['debug: production cost'] += production_reward
         self.env_spec_log['debug: start-up cost'] += startup_reward
         self.env_spec_log['debug: shut-down cost'] += shutdown_reward
@@ -653,7 +653,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         on_off = on_off.numpy() if torch.is_tensor(on_off) else on_off
         power = power.numpy() if torch.is_tensor(power) else power
         angle = angle.numpy() if torch.is_tensor(angle) else angle
-        demand = self.D_forecast
+        demand = self.D_forecast[0]
         # now they are at the same time step, t+1
 
         # compute the cost of raw action
@@ -709,38 +709,29 @@ class UnitCommitmentMasterEnv(gym.Env):
 
 
 class ForecastModel:
-    def __init__(self, model_type, loc, scale, size, deterministic_demand, nyiso_path='data/'):
+    def __init__(self, model_type, loc, scale, size, forecast_length, deterministic_demand):
         self.model_type = model_type
         self.loc = loc
         self.scale = scale
         self.size = size
+        self.forecast_length = forecast_length
         self.deterministic_demand = deterministic_demand
-        self.nyiso_path = nyiso_path
         self.model = None
         self.reset()
 
     def reset(self):
         if self.model_type == "deterministic":
             self.model = self.deterministic_demand
-        # elif self.model_type == "nyiso":
-        #     # make it 25hr to avoid the error in the last step
-        #     forecast_example = np.array(get_random_25hr_forecast(self.nyiso_path)).astype(float)
-        #     factor = self.loc / np.mean(forecast_example)
-        #     forecast_example = forecast_example * factor + np.random.normal(0, self.scale, forecast_example.shape)
-        #     self.model = iter(forecast_example)
         elif self.model_type == "normal":
-            # self.model = stats.norm(loc=self.loc, scale=self.scale)
-            self.model = np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
+            self.model = np.random.normal(loc=self.loc, scale=self.scale, size=(self.forecast_length, self.size))
 
     def forecast(self):
         if self.model_type == "deterministic":
-            d = self.model[0]
+            d = self.model[:self.forecast_length]
             self.model = np.roll(self.model, shift=-1, axis=0)
             return d
         elif self.model_type == 'normal':
-            return np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
-        # elif self.model_type == 'nyiso':
-        #     return next(self.model)
+            return np.random.normal(loc=self.loc, scale=self.scale, size=(self.forecast_length, self.size))
 
 
 def assign_env_config(self, kwargs):
