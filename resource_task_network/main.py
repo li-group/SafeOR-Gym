@@ -100,8 +100,8 @@ def main(args, env_id):
         warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
         gpu_id = None
 
-    T = 10
-    STEPS_PER_EPOCH = 80
+    T = 10 if args.env_config == "easy_environment_data.json" else 30
+    STEPS_PER_EPOCH = T * 8
     TOTAL_EPOCHS = 1000
     TOTAL_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS
 

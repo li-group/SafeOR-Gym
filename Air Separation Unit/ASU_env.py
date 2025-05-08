@@ -6,6 +6,7 @@ Akshdeep Singh Ahluwalia
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces        # https://gymnasium.farama.org/
+from typing import Any, ClassVar, List, Tuple, Optional, Dict
 
 from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete
 from gymnasium.utils import seeding
@@ -18,6 +19,9 @@ from PIL import Image, ImageDraw, ImageFont
 import random
 from scipy.spatial import ConvexHull
 from simulate_state import Get_electricity_dataframe, Get_demand_dataframe
+from typing import Any
+import torch
+import matplotlib.pyplot as plt
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -58,36 +62,64 @@ class ASUEnv(gym.Env):
         self.name = env_id
         lookahead = 4
         days_to_simulate = 7
+        T = days_to_simulate
 
         self.env_id = env_id
+        self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
 
         # Simulation time counters
         self.current_hour = 0  # hour in current day (0-23)
         self.current_day = 0   # start of the first day (0-indexed) 
         
         self.lookahead_days = lookahead
-        self.T = days_to_simulate
+        self.T = T
+        self._max_episode_steps = self.T
+
+        self.env_id = env_id
+        self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
         
         # Initialize parameters, state, observation and action spaces
         self._initialize_params()
         self._initialize_simulation_data()
         self._initialize_observation_space()
         self._initialize_action_space()
-        self._initialize_state()
+        # self._initialize_state()
 
-        self.reward = 0
-        self.done = False
-        self.info = {}
+        self.terminated = False
+        self.truncated = False
+        self.reward_ep = 0
+        self.cost_ep = 0
 
-        # Constants for penalties (tune these as necessary)
-        self.iv_penalty_factor = 20.0      # Penalty per unit of inventory exceeding maximum
-        self.demand_penalty_factor = 20.0         # Penalty per unit demand shortfall at end of day
-
+        self.Penalty_inventory = 20
+        self.Penalty_demand = 20
         self.env_spec_log = {'Number of Inventory Violation': 0,
                         'Cost of Inventory Violation': 0,
                         'Number of Demand Violation': 0,
                         'Cost of Demand Violation': 0,
                         }
+    
+    def _load_config(self):
+        with open(self.config_path, 'r') as f:
+            return json.load(f)
+
+    def assign_env_config(self, kwargs):
+        print("Assigning configuration...")
+        print(len(kwargs), "kwargs")
+        for key, value in kwargs.items():
+            print(f"Trying to set {key} to {value!r}")
+            # 1) ensure it's in the schema
+            if key not in self._CONFIG_SCHEMA:
+                raise AttributeError(f"{self!r} has no config attribute '{key}'")
+            # 2) type‐check
+            expected_type = self._CONFIG_SCHEMA[key]
+            if not isinstance(value, expected_type):
+                raise TypeError(
+                    f"Config '{key}' expects type {expected_type.__name__}, "
+                    f"got {type(value).__name__}"
+                )
+            # 3) finally setattr
+            print(f"Setting {key} to {value!r}")
+            setattr(self, key, value)
 
     def _initialize_simulation_data(self):
         # Electricity simulation
@@ -131,16 +163,41 @@ class ASUEnv(gym.Env):
         self.IV_i = self.loaded_data['IV_i']           # Initial inventory levels
         self.total_hours = self.loaded_data['total_hours'][0]
 
-    def _initialize_observation_space(self):
-        """Define the observation space."""
-        # Build the high bound for inventory from IV_u
-        self.iv_high = np.array([self.IV_u[prod] for prod in self.products], dtype=np.float32)
+    # def _initialize_observation_space(self):
+
+    #     self.reset()
+    #     """Define the observation space."""
+    #     # Build the high bound for inventory from IV_u
+    #     self.iv_high = np.array([self.IV_u[prod] for prod in self.products], dtype=np.float32)
         
-        self.observation_space = spaces.Dict({
-            'electricity_prices': spaces.Box(low=0, high=np.inf, shape=(24 * (1+self.lookahead_days),), dtype=np.float32),
-            'demand': spaces.Box(low=0, high=np.inf, shape=(len(self.products), 24 * (1+self.lookahead_days)), dtype=np.float32),
-            'IV': spaces.Box(low=0, high=self.iv_high, shape=(len(self.products),), dtype=np.float32)
-        })
+    #     self.observation_space = spaces.Dict({
+    #         'electricity_prices': spaces.Box(low=0, high=np.inf, shape=(24 * (1+self.lookahead_days),), dtype=np.float32),
+    #         'demand': spaces.Box(low=0, high=np.inf, shape=(len(self.products), 24 * (1+self.lookahead_days)), dtype=np.float32),
+    #         'IV': spaces.Box(low=0, high=self.iv_high, shape=(len(self.products),), dtype=np.float32)
+    #     })
+    
+    def _initialize_observation_space(self):
+        self.reset()
+        """Define the observation space as a single Box."""
+
+        # Dimensions
+        num_products = len(self.products)
+        price_dim = 24 * (1 + self.lookahead_days)
+        demand_dim = num_products * price_dim
+        iv_dim = num_products
+
+        # High bounds
+        price_high = np.full((price_dim,), np.inf, dtype=np.float32)
+        demand_high = np.full((demand_dim,), np.inf, dtype=np.float32)
+        iv_high = np.array([self.IV_u[prod] for prod in self.products], dtype=np.float32)
+        self.iv_high = np.array([self.IV_u[prod] for prod in self.products], dtype=np.float32)
+
+        # Concatenate all high bounds into a single high vector
+        high = np.concatenate([price_high, demand_high, iv_high])
+        low = np.zeros_like(high, dtype=np.float32)
+
+        # Define the single Box space
+        self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
     def _initialize_action_space(self):
         """  Define the action space.  """
@@ -157,9 +214,15 @@ class ASUEnv(gym.Env):
         row_liqprod, colliq_prod = self.extreme_points_liqp.shape
         self.row_liqprod = row_liqprod
 
-        self.action_space = spaces.Dict({
-            'lambda': spaces.Box(low=0, high=1, shape=(self.row_liqprod,), dtype=np.float32),
-        })
+        # self.action_space = spaces.Dict({
+        #     'lambda': spaces.Box(low=0, high=1, shape=(self.row_liqprod,), dtype=np.float32),
+        # })
+        self.action_space = spaces.Box(
+        low=0.0,
+        high=1.0,
+        shape=(self.row_liqprod,),  # Number of convex hull vertices
+        dtype=np.float32)
+
 
     def _initialize_state(self):
         """Initialize the state with default values."""
@@ -168,7 +231,8 @@ class ASUEnv(gym.Env):
         self.demand = np.zeros((len(self.products), 24 * (1+self.lookahead_days)), dtype=np.float32)
         
         # Set initial inventory levels from IV_i
-        self.IV = np.array([self.IV_i[prod] for prod in self.products], dtype=np.float32)
+        self.IV = np.zeros(len(self.products), dtype=np.float32)
+
         # Combine into the state dictionary
         self.state = {
             'electricity_prices': self.electricity_prices,
@@ -177,6 +241,8 @@ class ASUEnv(gym.Env):
         }
 
         self.update_demand_and_electricty_state()
+        self.update_physical_state()
+            
 
     def get_demand_and_el_states_for_the_day(self):
         start_day = self.current_day + 1
@@ -195,6 +261,16 @@ class ASUEnv(gym.Env):
                 index += 1
 
         return product_demand, electricity_prices
+    
+    def update_physical_state(self):
+
+        if self.current_hour == 0 and self.current_day == 0:
+            # Initialize the inventory state at the start of the first day
+            self.IV = np.array([self.IV_i[prod] for prod in self.products], dtype=np.float32)
+        # else:
+        #     self.IV = new_IV.copy()
+
+        self.state['IV'] = self.IV 
 
     def update_demand_and_electricty_state(self):
         """
@@ -210,7 +286,7 @@ class ASUEnv(gym.Env):
                                 For example, product_demand['LIN'][1] gives the demand for LIN on day 1.
             electricity_prices (dict): Electricity prices keyed by hour (starting at 1) over the full forecast horizon.
         """
-        
+
         product_demand, electricity_prices = self.get_demand_and_el_states_for_the_day()
         
         forecast_days = 1 + self.lookahead_days    # e.g., if lookahead_days is 6, then forecast 7 days in total.
@@ -242,6 +318,10 @@ class ASUEnv(gym.Env):
         # Also update the state immediately (with no shifting yet).
         self.state['demand'] = new_full_demand.copy()
         self.state['electricity_prices'] = new_full_prices.copy()
+
+        # if self.current_hour == 0:
+        self.demand_today = self.state['demand'][:, 23]  # Demand forecast for the current day (for each product) # Check demand for the present day: the 24th hour in the shifted demand array (index 23)
+        
 
     def shift_observation(self):
         """
@@ -291,31 +371,93 @@ class ASUEnv(gym.Env):
         # --- Penalty 1: Demand Shortfall at End of Day ---
         # Calculate demand shortfall
         demand_shortfall = np.maximum(self.demand_today - ship_quantity, 0)
-        demand_penalty = self.demand_penalty_factor * np.sum(demand_shortfall)
+        demand_penalty = self.Penalty_demand * np.sum(demand_shortfall)
 
         if demand_penalty > 0:
             self.env_spec_log['Number of Demand Violation'] += 1
             self.env_spec_log['Cost of Demand Violation'] += demand_penalty
         return demand_penalty
 
-    def inventory_penalty(self, new_IV):
+    def inventory_penalty(self):
         # --- Penalty 2: Inventory Exceeding Maximum --- 
         # For each product, if new_IV > iv_high, impose a penalty proportional to the excess
-        inventory_excess = np.maximum(new_IV - self.iv_high, 0)
-        inventory_penalty = self.iv_penalty_factor * np.sum(inventory_excess)
+        # inventory_excess = np.maximum(new_IV - self.iv_high, 0)
+        inventory_excess = np.maximum(self.IV - self.iv_high, 0)
+        inventory_penalty = self.Penalty_inventory * np.sum(inventory_excess)
 
         if inventory_penalty > 0:
             self.env_spec_log['Number of Inventory Violation'] += 1
             self.env_spec_log['Cost of Inventory Violation'] += inventory_penalty
         return inventory_penalty
+    
+    def sanitize_action(self, inventory_penalty):
 
-    def step(self, action):
+        """
+        Sanitize the action to prevent tank overflow.
+        If the action leads to an inventory level exceeding IV_u, adjust the action.
+        """
+        if inventory_penalty > 0:
+            # update self.IV to respect the upper bound
+            self.IV = np.minimum(self.IV, self.iv_high)
 
+
+    def update_information_state(self):
+        """
+        Update the information state based on the current hour and day.
+        This method is called at the end of each hour to update the state with new information.
+        """
+        # If one day (24 hours) is complete, you might call update_observation externally to refresh the full forecasts.
         if self.current_hour == 0:
-            self.demand_today = self.state['demand'][:, 23]  # Demand forecast for the current day (for each product) # Check demand for the present day: the 24th hour in the shifted demand array (index 23)
-            
-        # Extract action components
-        lambda_action = action['lambda']
+            self.update_demand_and_electricty_state()
+        else:
+            self.shift_observation()
+
+    def decode_action(self, action):
+        """
+        Decode the action from the action space.
+        This method converts the raw action into a structured format.
+        """
+        # Assuming action is a numpy array of shape (row_liqprod,)
+        # Convert to dictionary format
+        action_dict = {
+            'lambda': action
+        }
+        return action_dict
+    
+    def encode_observation(self, state):
+        """
+        Encode the observation into a flattened format.
+        This method converts the state dictionary into a single array.
+        """
+        # Flatten the state dictionary into a single array
+        flatt_state = np.concatenate([
+            state['electricity_prices'],
+            state['demand'].flatten(),
+            state['IV']
+        ])
+        # Electricity prices: 24 * (1+self.lookahead_days): 
+        # Demand: len(self.products) * 24 * (1+self.lookahead_days)
+        # IV: len(self.products)
+        # flatt_state.shape = (24 * (1+self.lookahead_days) + len(self.products) * 24 * (1+self.lookahead_days) + len(self.products),)
+        # For current:    -->  24*5 + 24*3*5 + 3
+        return flatt_state
+
+    def step(self, raw_action):
+
+        trucnated = False
+
+        if isinstance(raw_action, torch.Tensor):
+            raw_action = raw_action.to(self._device)
+            action = raw_action.cpu().numpy()
+        else:
+            action = raw_action
+
+        action = raw_action.numpy() if torch.is_tensor(raw_action) else raw_action
+
+        # make sure the action is within the valid range
+        action = np.clip(action, self.action_space.low, self.action_space.high)
+        action_dict = self.decode_action(action)     
+        lambda_action = action_dict['lambda']
 
         # Validate action dimensions
         assert lambda_action.shape == (self.row_liqprod,), \
@@ -328,68 +470,108 @@ class ASUEnv(gym.Env):
         # --- Production Cost and Production Vector ---
         production_vector, prod_cost = self.production_quantity_and_cost(lambda_action)
 
-        # --- Update Inventory and Penalty 2: Demand Shortfall (only at the end of the day) ---
+        # PENALTY 1: DEMAND SHORTFALL
         # demand_today = self.state['demand'][:, 23]  # Demand forecast for the current day (for each product) # Check demand for the present day: the 24th hour in the shifted demand array (index 23)
         if self.current_hour == 23:
             # At hour 23, we need to ship out the demand for the day
             ship_quantity = np.minimum(self.demand_today, self.IV + production_vector)  # since, we can ship only what we have in inventory
             # Update inventory after shipping
-            new_IV = self.IV + production_vector - ship_quantity
+            # new_IV = self.IV + production_vector - ship_quantity
+            self.IV += production_vector - ship_quantity
             demand_penalty = self.demand_penalty(ship_quantity)
         else:
             # For other hours, just update inventory with production
-            new_IV = self.IV + production_vector
+            # new_IV = self.IV + production_vector
+            self.IV += production_vector
             demand_penalty = 0
-            
-        inventory_penalty = self.inventory_penalty(new_IV)
-
-        total_penalty = inventory_penalty + demand_penalty
         
-        # Increment simulation time
+        # PENALTY 2: INVENTORY 
+        inventory_penalty = self.inventory_penalty()
+
+        # Positive cost (penalties) incurred
+        cost = inventory_penalty + demand_penalty
+        self.cost_ep += cost
+        self.cost = cost
+
+        # Reward is negative of operational expense
+        self.reward_ep += - prod_cost
+        reward = - prod_cost
+        self.reward = reward
+
+        # Increment simulation time and day
         self.current_hour += 1
-
-        # If one day (24 hours) is complete, you might call update_observation externally to refresh the full forecasts.
-        if self.current_hour >= 24:
-            self.current_hour = 0
+        if self.current_hour == 24:
+            self.current_hour = 0   # END of certain day = Start of next day
             self.current_day += 1   
-            self.update_demand_and_electricty_state()
 
-        # --- Update Inventory State ---
-        self.IV = new_IV.copy()
-        # Shift the observation based on elapsed hours
-        self.shift_observation()  
+        # Now santize the action to land the correct physical state
+        action = self.sanitize_action(inventory_penalty)
 
-        ## HERE MAKE FUCNTION TO UPDATE INVENTORY STATE
-        ## HOWEVER BEFORE CALLING, SANIRTIZE THE ACTION TO PREVENT TANK OVERFLOW
-        self.state['IV'] = self.IV      
-
-        # Total cost: production cost plus penalties
-        total_cost = prod_cost + total_penalty
-        reward = -total_cost
+        self.update_physical_state()
+        self.update_information_state()
 
         if self.current_day == self.T:
-            self.done = True
+            self.terminated = True
 
-        return self.state, reward, self.done, self.info
+        self.flatt_state = self.encode_observation(self.state)
+        flatt_state_tensor = th.tensor(self.flatt_state, dtype = th.float32, device=self._device)
 
-    def reset(self):
+        # PRINT flattened OBS SPACE dimension throughout the episode to check.
+        return flatt_state_tensor, th.tensor(reward-cost, dtype = th.float32, device=self._device), th.tensor(self.terminated, dtype = th.bool, device=self._device), th.tensor(self.truncated, dtype = th.bool, device=self._device), {}
+
+    def _get_state(self, mode):
+        if mode == 'dict':
+            return self.state
+        elif mode == 'flatt':
+            return self.flatt_state
+        elif mode == 'tensor':
+            return th.tensor(self.flatt_state, device=self._device)
+        else:
+            raise ValueError("Invalid mode. Choose from 'dict', 'flatt', or 'tensor'.")
+        
+    @property
+    def max_episode_steps(self) -> int:
+        return self.T
+
+    def render(self, mode='human'):
+        print("state:", f"{self._get_state(mode='dict')}")
+        print("reward:", f"{self.reward_ep}")
+        print("cost", f"{self.cost_ep}")
+        print("specification:", f"{self.env_spec_log}")
+
+    def close(self) -> None:
+        return None
+
+    def set_seed(self, seed: int) -> None:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         """Reset the environment to its initial state."""
         self.current_hour = 0
         self.current_day = 0
-        self._initialize_state()
-        self.done = False
+
+        self.reward_ep = 0
+        self.cost_ep = 0
+        self.cost = 0
         self.reward = 0
-        # return self.state, self.reward, self.done, self.info
-    
-    def render(self):
-        """Return the current state of the environment."""
-        return self.state
-    
+        self.terminated = False 
+        self.truncated = False
+        self.info = {}
+
+        self._initialize_state()
+        self.flatt_state = self.encode_observation(self.state)
+        flatt_state_tensor = th.tensor(self.flatt_state, dtype=th.float32, device=self._device)
+
+        # print("self.flatt_state_tensor from reset", flatt_state_tensor.shape)
+        return flatt_state_tensor, {"dict_state": self.state, "terminated": self.terminated, "truncated": self.truncated}
+            
     def sample_action(self):
-        """Sample a random action from the action space."""
-        action = {}
-        action['lambda'] = self.action_space['lambda'].sample()
-        return action
+        return self.action_space.sample()
+    
+    def sample_state(self):
+        return self.observation_space.sample()
 
     def _plot_demand_state(self):
         """Plot the demand state for visualization."""
