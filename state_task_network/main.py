@@ -100,8 +100,8 @@ def main(args, env_id):
         warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
         gpu_id = None
 
-    T = 10
-    STEPS_PER_EPOCH = 80
+    T = 10 if args.env_config == "easy_environment_data.json" else 30
+    STEPS_PER_EPOCH = 8 * T
     TOTAL_EPOCHS = 1000
     TOTAL_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS
 
@@ -127,7 +127,7 @@ def main(args, env_id):
     eg.add('env_cfgs:env_init_config:debug', [args.debug])
     eg.add('env_cfgs:env_init_config:sanitization_cost_weight', [1.0])
     eg.add('env_cfgs:env_init_config:cost_coefficient', [1.0])
-    
+
     eg.run(train, num_pool = 1, gpu_id = gpu_id)
     eg.analyze(parameter = 'algo', values=None, compare_num = 1)
     a = eg.evaluate(num_episodes = 1)

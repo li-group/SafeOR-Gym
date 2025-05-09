@@ -72,21 +72,21 @@ def init_model(args, data):
 
     P_max = np.array([455, 130, 130, 80, 55])
     P_min = np.array([150, 20, 20, 20, 55])
-    a = np.array([0.00048, 0.00200, 0.00211, 0.00712, 0.00413]) * 0.1
-    b = np.array([16.19, 16.60, 16.50, 22.26, 25.92]) * 0.1
-    c = np.array([1000, 700, 680, 370, 660]) * 0.1
+    a = np.array([0.00048, 0.00200, 0.00211, 0.00712, 0.00413])
+    b = np.array([16.19, 16.60, 16.50, 22.26, 25.92])
+    c = np.array([1000, 700, 680, 370, 660])
     UT = np.array([8, 5, 5, 3, 1])
     DT = np.array([8, 5, 5, 3, 1])
     RU = np.array([300, 85, 85, 55, 55])
     RD = np.array([300, 85, 85, 55, 55])
     SU = np.array([300, 85, 85, 55, 55])
     SD = np.array([300, 85, 85, 55, 55])
-    hot_cost = np.array([4500, 550, 560, 170, 30]) * 0.1
-    cold_cost = np.array([9000, 1100, 1120, 340, 60]) * 0.1
+    hot_cost = np.array([4500, 550, 560, 170, 30])
+    cold_cost = np.array([9000, 1100, 1120, 340, 60])
     cold_hrs = np.array([5, 4, 4, 2, 0])
-    C_SD = np.array([0, 0, 0, 0, 0]) * 0.1
-    C_LS = 10000 * 0.1
-    C_RP = 100 * 0.1
+    C_SD = np.array([0, 0, 0, 0, 0])
+    C_LS = 100
+    C_RP = 100
     R = 10
 
     u0_seq = {0: np.ones(8 + 1),  # assume only 1st generator is on
@@ -256,7 +256,7 @@ def init_model(args, data):
         return m.shutdown_cost[t] == sum(m.w[t, i] * m.C_SD[i] for i in m.generators)
 
     def load_shedding_cost_rule(m, t):
-        return m.load_shedding_cost[t] == sum(m.C_LS * (m.s_pos[t, n] + m.s_neg[t, n]) for n in m.buses)
+        return m.load_shedding_cost[t] == sum(m.C_LS * (m.s_pos[t, n]) for n in m.buses)
 
     def reserve_penalty_cost_rule(m, t):
         return m.reserve_penalty_cost[t] == m.C_RP * m.sr[t]
@@ -318,6 +318,10 @@ def init_model(args, data):
 #     data = None  # Replace with actual data if needed
 #     model = init_model(args_instance, data)
 #
+#     solver = pe.SolverFactory("gurobi")
+#     solver.options['NonConvex'] = 2
+#     results = solver.solve(model, False)
+#
 #     action = {'on_off': {}, 'power': {}, 'angle': {}}
 #     action_arr = np.zeros((24, 5+5+3))
 #     for t in range(1, 25):
@@ -329,37 +333,9 @@ def init_model(args, data):
 #         for n in range(1, 4):
 #             action['angle'][t, n] = model.pi[t, n].value
 #             action_arr[t-1, 9 + n] = model.pi[t, n].value
-#     #     print(f"step {t}")
-#     #     print(f"production cost: {model.production_cost[t].value}")
-#     #     print(f"startup cost: {model.startup_cost[t].value}")
-#     #     print(f"shutdown cost: {model.shutdown_cost[t].value}")
-#     #     print(f"load shedding cost: {model.load_shedding_cost[t].value}")
-#     #     print(f"reserve penalty cost: {model.reserve_penalty_cost[t].value}")
-#     #     print(f"total cost: {model.total_cost[t].value}")
 #     # save action arr
 #     np.save('opt_action_v1_arr.npy', action_arr)
 #     print(f"optimal cost v1: {model.obj()}")
-#
-#     # states = []
-#     # for t in range(1, 25):
-#     #     state = {"u_seq": {},
-#     #              "D_forecast": {},
-#     #              "p": {},
-#     #              "pi": {}}
-#     #     for i in range(5):
-#     #         state["u_seq"][i] = model.u[t, i].value
-#     #         state["p"][i] = model.p[t, i].value
-#     #     for n in range(4):
-#     #         state["D_forecast"][n] = model.demand[t, n].value
-#     #         state["pi"][n] = model.pi[t, n].value
-#     #     states.append(state)
-#     # for t in range(24):
-#     #     state = states[t]
-#     #     print(f"step {t}")
-#     #     print(f"u: {state['u_seq']}")
-#     #     print(f"D_forecast: {state['D_forecast']}")
-#     #     print(f"p: {state['p']}")
-#     #     print(f"pi: {state['pi']}")
 #
 #     args_instance = args(env_id='UC-v0')
 #     data = None  # Replace with actual data if needed

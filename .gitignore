@@ -171,3 +171,7 @@ cython_debug/
 .pypirc
 /UnitCommitment/runs/
 /UnitCommitment/exp-x/
+UnitCommitment/algo---UC-v0---e9ff1503d983fdaa971bb1f71317e524c2a63c2c46228644faa3df1c3038cb31.png
+UnitCommitment/algo---UC-v1---eeff9c7a65c663beafb83b6713d701b09a8ad799a8f38ad70b5ec0f0bf4e8fdb.png
+UnitCommitment/set_up_hao.py
+/UnitCommitment/results/

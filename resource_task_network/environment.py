@@ -430,21 +430,19 @@ class RTNEnv(gym.Env):
         Outputs
             - updated inventory (ndarray)
         """
-        if np.any(new_inventory < self.lower_bounds) or np.any(new_inventory > self.upper_bounds):
-            violated = [(i, self.resources[i], new_inventory[i], self.lower_bounds[i], self.upper_bounds[i]) for i in range(len(self.resources)) if new_inventory[i] < self.lower_bounds[i] or new_inventory[i] > self.upper_bounds[i]]
+        for i, res in enumerate(self.resources):
+            # skip reactants — we allow them to go below zero
+            if res in self.reactants:
+                continue
             
-            self.logger.debug(f'---- Fixing violated inventory bounds ----')
-            for idx, res, val, lb, ub in violated:
-                if val < lb:
-                    new_inventory[idx] = lb
-                elif val > ub:
-                    new_inventory[idx] = ub
-            
-            return new_inventory
-        
-        raise NotImplementedError
-        
+            if new_inventory[i] < self.lower_bounds[i]:
+                new_inventory[i] = self.lower_bounds[i]
+            elif new_inventory[i] > self.upper_bounds[i]:
+                new_inventory[i] = self.upper_bounds[i]
+       
+        return new_inventory
 
+        
     def _compute_resource_change(self, action: np.ndarray) -> np.ndarray:
         """
         Compute net change from tasks stoichiometry for reactants 
@@ -564,7 +562,7 @@ class RTNEnv(gym.Env):
         utility_cost = self._compute_utility_cost(action)
 
         # Unmet demand = total demand - fulfilled amount
-        unmet_demand = current_demand - np.minimum(current_demand, available_to_fulfill)
+        unmet_demand = -current_demand - np.minimum(-current_demand, available_to_fulfill)
         unmet_penalty = sum(1.5 * unmet_demand[i] * product_price.get(prod) for i, prod in enumerate(self.products)) # 1.5 is a tunable penalty coefficient
 
         reactant_penalty = 0.0
@@ -689,6 +687,8 @@ class RTNEnv(gym.Env):
 
             # Check consumption side for each resource
             for j, r in enumerate(self.materials):
+                if r in self.reactants:
+                    continue
                 coeff = stoich.get(r, 0.0)
                 if coeff < 0:  # Only consider consumption terms
                     # How much we can afford to consume without violating the lower bound
@@ -742,7 +742,7 @@ class RTNEnv(gym.Env):
     
         """
         # Clip action between -1.0 and 1.0
-        action = torch.clamp(action, min = -1.0, max = 1.0)
+        action = np.clip(action, a_min = -1.0, a_max = 1.0)
 
         self._update_delivery_products()
         self.logger.debug(f'---- Raw action: {action} ----')
@@ -770,7 +770,7 @@ class RTNEnv(gym.Env):
 
         if not feasible:
             self.cost = self._compute_cost(self.inventory)
-            self.reward = self._compute_reward(self.inventory, sanitized_action)  # Heavy penalty.
+            self.reward = self._compute_reward(new_inventory, sanitized_action)  # Heavy penalty.
             truncated = False
             new_inventory = self._update_fix_inventory(new_inventory) # Bound the inventories between lower and upper bounds.
         else:

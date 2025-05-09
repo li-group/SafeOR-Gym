@@ -105,15 +105,21 @@ class UnitCommitmentMasterEnv(gym.Env):
                              'Penalty of Ramping Up Violation': 0,
                              'Number of Ramping Down Violation': 0,
                              'Penalty of Ramping Down Violation': 0,
-                             'Number of Irreparable Violation': 0,
-                             'Penalty of Irreparable Violation': 0,
+                             # 'Number of Irreparable Violation': 0,
+                             # 'Penalty of Irreparable Violation': 0,
+                             "debug: underflow in total": 0,
+                             'debug: production cost': 0,
+                             'debug: start-up cost': 0,
+                            'debug: shut-down cost': 0,
+                             'debug: load shedding cost': 0,
+                            'debug: reserve cost': 0,
                              }
 
         self.penalty_factor_UT = 100
         self.penalty_factor_DT = 100
         self.penalty_factor_RampUp = 100
         self.penalty_factor_RampDown = 100
-        self.penalty_factor_irreparable = 1000000
+        # self.penalty_factor_irreparable = 1000000
 
         self.T = 24
         self._max_episode_steps = self.T
@@ -187,7 +193,7 @@ class UnitCommitmentMasterEnv(gym.Env):
 
         # default forecast
         self.model_type = 'deterministic'
-        self.nyiso_path = "./or_gym/envs/power_system/" + 'data/'
+        self.forecast_length = 8
 
         # default information
         self.P_max = np.array([455, 130, 130, 80, 55])
@@ -205,7 +211,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.cold_cost = np.array([9000, 1100, 1120, 340, 60])
         self.cold_hrs = np.array([5, 4, 4, 2, 0])
         self.C_SD = np.array([0, 0, 0, 0, 0])
-        self.C_LS = 10000
+        self.C_LS = 100
         self.C_RP = 100
         self.R = 10
 
@@ -229,9 +235,9 @@ class UnitCommitmentMasterEnv(gym.Env):
         assign_env_config(self, kwargs)
 
         # initialize belief model/data
-        self.D_forecast = np.zeros(self.num_bus)
-        self.forecast_model = ForecastModel(self.model_type, self.loc, self.scale, self.num_bus,
-                                            self.deterministic_demand, self.nyiso_path)
+        self.D_forecast = np.zeros((self.forecast_length, self.num_bus))
+        self.forecast_model = ForecastModel(self.model_type, self.loc, self.scale, self.num_bus, self.forecast_length,
+                                            self.deterministic_demand)
 
         self.reset()
 
@@ -251,7 +257,9 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.raw_observation_space = gym.spaces.Dict(
                 {
                     "u_seq": gym.spaces.MultiBinary((np.maximum(self.UT, self.DT) + 1).sum()),
-                    "D_forecast": gym.spaces.Box(low=0, high=np.ones(self.num_bus) * self.P_max.sum(), dtype=np.float32),
+                    "D_forecast": gym.spaces.Box(low=0,
+                                                 high=np.ones(self.num_bus * self.forecast_length) * self.P_max.sum(),
+                                                 dtype=np.float32),
                     "p": gym.spaces.Box(low=0, high=self.P_max, dtype=np.float32)
                 })
             self.observation_space = flatten_space(self.raw_observation_space)
@@ -274,7 +282,9 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.raw_observation_space = gym.spaces.Dict(
                 {
                     "u_seq": gym.spaces.MultiBinary((np.maximum(self.UT, self.DT) + 1).sum()),
-                    "D_forecast": gym.spaces.Box(low=0, high=np.ones(self.num_bus) * self.P_max.sum(), dtype=np.float32),
+                    "D_forecast": gym.spaces.Box(low=0,
+                                                 high=np.ones(self.num_bus * self.forecast_length) * self.P_max.sum(),
+                                                 dtype=np.float32),
                     "p": gym.spaces.Box(low=0, high=self.P_max, dtype=np.float32),
                     "pi": gym.spaces.Box(low=self.Pi_min, high=self.Pi_max, dtype=np.float32)
                 })
@@ -308,7 +318,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                 "p": self.p,
             }
             obs_arr = np.concatenate([self._vectorize_seq(self.u_seq),
-                                      self.D_forecast,
+                                      self.D_forecast.reshape(-1),
                                       self.p])
         elif self.env_id == 'UC-v1':
             obs_dict = {
@@ -318,7 +328,7 @@ class UnitCommitmentMasterEnv(gym.Env):
                 "pi": self.pi
             }
             obs_arr = np.concatenate([self._vectorize_seq(self.u_seq),
-                                      self.D_forecast,
+                                      self.D_forecast.reshape(-1),
                                       self.p,
                                       self.pi])
         else:
@@ -448,12 +458,12 @@ class UnitCommitmentMasterEnv(gym.Env):
         p_curr = self.p
         pi_new = angle
 
-        # check contradiction
-        # we must keep it off, as turning on will result in a too early turn-on
-        must_off = np.array([np.sum(self.w_seq[i][:-1]) for i in self.generators]) > 0
-        # we must keep it on, as turning off will result in a too large decrease
-        must_on = p_curr > self.SD
-        contradiction = must_on & must_off
+        # # check contradiction
+        # # we must keep it off, as turning on will result in a too early turn-on
+        # must_off = np.array([np.sum(self.w_seq[i][:-1]) for i in self.generators]) > 0
+        # # we must keep it on, as turning off will result in a too large decrease
+        # must_on = p_curr > self.SD
+        # contradiction = must_on & must_off
 
         # repair part of the action
         repaired_pi_new = np.minimum(np.maximum(pi_new, self.Pi_min), self.Pi_max)
@@ -463,22 +473,28 @@ class UnitCommitmentMasterEnv(gym.Env):
         repaired_u_new = np.where(DT_violation, 0, np.where(UT_violation, 1, u_new))
         repaired_v_new, repaired_w_new = self._reckless_move(repaired_u_new, u_curr)
 
-        if np.any(contradiction):
-            # self.truncated = True # DON'T TRUNCATE EVEN THOUGH WE CANNOT REPAIR THE ACTION
-            repaired_p_new = u_new * np.minimum(np.maximum(p_new, self.P_min), self.P_max)
-            # ADD UP A VERY LARGE COST INSTEAD
-            irreparable_violation = contradiction
-            irreparable_cost = np.sum(contradiction) * self.penalty_factor_irreparable
-            self.cost += irreparable_cost
+        # if np.any(contradiction):
+        #     # self.truncated = True # DON'T TRUNCATE EVEN THOUGH WE CANNOT REPAIR THE ACTION
+        #     repaired_p_new = u_new * np.minimum(np.maximum(p_new, self.P_min), self.P_max)
+        #     # ADD UP A VERY LARGE COST INSTEAD
+        #     irreparable_violation = contradiction
+        #     irreparable_cost = np.sum(contradiction) * self.penalty_factor_irreparable
+        #     self.cost += irreparable_cost
+        #
+        #     self.env_spec_log['Number of Irreparable Violation'] += np.sum(irreparable_violation)
+        #     self.env_spec_log['Penalty of Irreparable Violation'] += irreparable_cost
+        #
+        # else:
+        #     # repair the rest of the action
+        #     ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
+        #     lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
+        #     repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
+        # return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_pi_new
+        # return u_new, v_new, w_new, p_new, pi_new
 
-            self.env_spec_log['Number of Irreparable Violation'] += np.sum(irreparable_violation)
-            self.env_spec_log['Penalty of Irreparable Violation'] += irreparable_cost
-
-        else:
-            # repair the rest of the action
-            ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
-            lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
-            repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
+        ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
+        lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
+        repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
         return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_pi_new
 
     def _compute_reserve(self, u_new: np.ndarray,
@@ -507,8 +523,8 @@ class UnitCommitmentMasterEnv(gym.Env):
         flow_out = np.array([np.sum(flow[self.from_bus_lines[b]]) for b in self.buses])
         flow_diff = flow_in - flow_out
         s = demand - np.array([np.sum(p_new[self.bus_gen[b]]) for b in self.buses]) - flow_diff
-        overflow = np.maximum(0, s)
-        underflow = - np.minimum(0, s)
+        underflow = np.maximum(0, s)
+        overflow = - np.minimum(0, s)
         return overflow, underflow
 
     def _compute_production_reward(self, p_new):
@@ -521,7 +537,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         return - np.sum(self.C_SD * w_new)
 
     def _compute_fulfillment_reward(self, overflow, underflow):
-        return - self.C_LS * np.sum(overflow + underflow)
+        return - self.C_LS * np.sum(underflow)
 
     def _compute_reservation_reward(self, reserve):
         return - self.C_RP * np.maximum(self.R - np.sum(reserve), 0)
@@ -539,21 +555,31 @@ class UnitCommitmentMasterEnv(gym.Env):
         flow = self._compute_power_flow(pi_new)
         # compute the power slack
         overflow, underflow = self._compute_power_slack(p_new, flow, demand)
+        self.env_spec_log['debug: underflow in total'] += np.sum(underflow)
 
         # compute the reward
-        reward += self._compute_production_reward(p_new)
-        reward += self._compute_startup_reward(v_new)
-        reward += self._compute_shutdown_reward(w_new)
-        reward += self._compute_fulfillment_reward(overflow, underflow)
-        reward += self._compute_reservation_reward(reserve)
+        production_reward = self._compute_production_reward(p_new)
+        startup_reward = self._compute_startup_reward(v_new)
+        shutdown_reward = self._compute_shutdown_reward(w_new)
+        load_shedding_reward = self._compute_fulfillment_reward(overflow, underflow)
+        reserve_shortfall_reward = self._compute_reservation_reward(reserve)
+        reward = (production_reward + startup_reward + shutdown_reward +
+                        load_shedding_reward + reserve_shortfall_reward)
+        self.env_spec_log['debug: production cost'] += production_reward
+        self.env_spec_log['debug: start-up cost'] += startup_reward
+        self.env_spec_log['debug: shut-down cost'] += shutdown_reward
+        self.env_spec_log['debug: load shedding cost'] += load_shedding_reward
+        self.env_spec_log['debug: reserve cost'] += reserve_shortfall_reward
         return reward
 
-    def _compute_cost(self, on_off: np.ndarray, power: np.ndarray) -> np.int64:
+    def _compute_cost(self, on_off: np.ndarray, power: np.ndarray, angle: np.ndarray,
+                      demand: np.ndarray) -> np.int64:
         u_new = on_off
         u_curr = self.u
         v_new, w_new = self._reckless_move(u_new, u_curr)
         p_new = u_new * np.minimum(np.maximum(power, self.P_min), self.P_max)
         p_curr = self.p
+        pi_new = angle
 
         # compute cost (raw action)
         UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
@@ -561,6 +587,13 @@ class UnitCommitmentMasterEnv(gym.Env):
                                                                                                p_new, p_curr,
                                                                                                v_new, w_new)
         cost = UT_cost + DT_cost + RampUp_cost + RampDown_cost
+
+        # # compute the flow
+        # flow = self._compute_power_flow(pi_new)
+        # # compute the power slack
+        # overflow, underflow = self._compute_power_slack(p_new, flow, demand)
+        # load_shedding_cost = - self._compute_fulfillment_reward(overflow, underflow)
+        # cost += load_shedding_cost
 
         # log the violation and cost
         self.env_spec_log['Number of Minimum Up-time Violation'] += np.sum(UT_violation)
@@ -589,7 +622,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             action_low = {key: np.array(value) for key, value in self.action_low.items()}
             action_high = {key: np.array(value) for key, value in self.action_high.items()}
 
-        on_off_rounded = on_off >= 0
+        on_off_rounded = (on_off >= 0).float() if torch.is_tensor(on_off) else (on_off >= 0).astype(float)
         power_scaled = (power + 1) / 2 * (action_high["power"] - action_low["power"]) + action_low["power"]
         angle_scaled = (angle + 1) / 2 * (action_high["angle"] - action_low["angle"]) + action_low["angle"]
         return on_off_rounded, power_scaled, angle_scaled
@@ -620,11 +653,11 @@ class UnitCommitmentMasterEnv(gym.Env):
         on_off = on_off.numpy() if torch.is_tensor(on_off) else on_off
         power = power.numpy() if torch.is_tensor(power) else power
         angle = angle.numpy() if torch.is_tensor(angle) else angle
-        demand = self.D_forecast
+        demand = self.D_forecast[0]
         # now they are at the same time step, t+1
 
         # compute the cost of raw action
-        self.cost += self._compute_cost(on_off, power)
+        self.cost += self._compute_cost(on_off, power, angle, demand)
 
         # repair the action (may fail to repair -> use the partially repaired action and add a large cost)
         # Note the _repair_action function will also update the cost inside the function if irreparable
@@ -676,38 +709,29 @@ class UnitCommitmentMasterEnv(gym.Env):
 
 
 class ForecastModel:
-    def __init__(self, model_type, loc, scale, size, deterministic_demand, nyiso_path='data/'):
+    def __init__(self, model_type, loc, scale, size, forecast_length, deterministic_demand):
         self.model_type = model_type
         self.loc = loc
         self.scale = scale
         self.size = size
+        self.forecast_length = forecast_length
         self.deterministic_demand = deterministic_demand
-        self.nyiso_path = nyiso_path
         self.model = None
         self.reset()
 
     def reset(self):
         if self.model_type == "deterministic":
             self.model = self.deterministic_demand
-        # elif self.model_type == "nyiso":
-        #     # make it 25hr to avoid the error in the last step
-        #     forecast_example = np.array(get_random_25hr_forecast(self.nyiso_path)).astype(float)
-        #     factor = self.loc / np.mean(forecast_example)
-        #     forecast_example = forecast_example * factor + np.random.normal(0, self.scale, forecast_example.shape)
-        #     self.model = iter(forecast_example)
         elif self.model_type == "normal":
-            # self.model = stats.norm(loc=self.loc, scale=self.scale)
-            self.model = np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
+            self.model = np.random.normal(loc=self.loc, scale=self.scale, size=(self.forecast_length, self.size))
 
     def forecast(self):
         if self.model_type == "deterministic":
-            d = self.model[0]
+            d = self.model[:self.forecast_length]
             self.model = np.roll(self.model, shift=-1, axis=0)
             return d
         elif self.model_type == 'normal':
-            return np.random.normal(loc=self.loc, scale=self.scale, size=self.size)
-        # elif self.model_type == 'nyiso':
-        #     return next(self.model)
+            return np.random.normal(loc=self.loc, scale=self.scale, size=(self.forecast_length, self.size))
 
 
 def assign_env_config(self, kwargs):
@@ -725,19 +749,35 @@ def assign_env_config(self, kwargs):
             else:
                 raise AttributeError(f"{self} has no attribute, {key}")
 
-#
+# import pickle
+# with open('../algorithms/optimal_action_UC-v0.pkl', 'rb') as f:
+#     opt_action_v0 = pickle.load(f)
+# actions = []
+# for t in range(1, 25):
+#     print(f"Time {t}: {[opt_action_v0['on_off'][(t, i)]for i in range(5)]}, Power: {[opt_action_v0['power'][(t, i)] for i in range(5)]}")
+#     actions.append([opt_action_v0['on_off'][(t, i)] for i in range(5)] +
+#                       [opt_action_v0['power'][(t, i)] for i in range(5)])
+# actions = np.array(actions)
 # env = UnitCommitmentMasterEnv(env_id='UC-v0')
 # state = env.reset()
-# actions = np.load("./opt_action_v0_arr.npy")
 # total = 0
 # for action in actions:
 #     state, reward, terminated, truncated, info = env.step(action)
 #     total += reward
 # print("Total Reward v0:", total)
+# #
 #
+# with open('../algorithms/optimal_action_UC-v1.pkl', 'rb') as f:
+#     opt_action_v1 = pickle.load(f)
+# actions = []
+# for t in range(1, 25):
+#     print(f"Time {t}: {[opt_action_v1['on_off'][(t, i)]for i in range(5)]}, Power: {[opt_action_v1['power'][(t, i)] for i in range(5)]}")
+#     actions.append([opt_action_v1['on_off'][(t, i)] for i in range(5)] +
+#                       [opt_action_v1['power'][(t, i)] for i in range(5)] +
+#                    [opt_action_v1['angle'][(t, i)] for i in range(1,4)])
+# actions = np.array(actions)
 # env = UnitCommitmentMasterEnv(env_id='UC-v1')
 # state = env.reset()
-# actions = np.load("./opt_action_v1_arr.npy")
 # total = 0
 # for t, action in enumerate(actions):
 #     state, reward, terminated, truncated, info = env.step(action)

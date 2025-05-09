@@ -76,12 +76,28 @@ class UCMILPSolver(BaseMILPSolver):
 
         return optimal_action
 
-#
-# if __name__ == '__main__':
-#     # Example usage
-#     for env_id in ['UC-v0', 'UC-v1']:
-#         env = UnitCommitmentMasterEnv(env_id=env_id)
-#         solver = UCMILPSolver(env, solve_horizon=24, solver_verbose=False)
-#         opt_action = solver.get_action(None)
-#         print(f"Optimal Action {env_id}:\n\n", opt_action)
-#         print(f"Objective Value {env_id}:\n\n", opt_action['objective'])
+
+if __name__ == '__main__':
+    # Example usage
+    for env_id in ['UC-v0', 'UC-v1']:
+        env = UnitCommitmentMasterEnv(env_id=env_id)
+        solver = UCMILPSolver(env, solve_horizon=24, solver_verbose=False)
+        opt_action = solver.get_action(None)
+        # save the json
+        with open(f'optimal_action_{env_id}.pkl', 'wb') as f:
+            pickle.dump(opt_action, f)
+        print(f"Optimal Action {env_id}:\n\n", opt_action)
+        print(f"Objective Value {env_id}:\n\n", opt_action['objective'])
+
+    with open('optimal_action_UC-v0.pkl', 'rb') as f:
+        opt_action_v0 = pickle.load(f)
+    with open('optimal_action_UC-v1.pkl', 'rb') as f:
+        opt_action_v1 = pickle.load(f)
+
+    print(f'v0')
+    for t in range(1, 25):
+        print(f"Time {t}: {[opt_action_v0['on_off'][(t, i)]for i in range(5)]}, Power: {[opt_action_v0['power'][(t, i)] for i in range(5)]}")
+
+    print(f'v1')
+    for t in range(1, 25):
+        print(f"Time {t}: {[opt_action_v0['on_off'][(t, i)] for i in range(5)]}, Power: {[opt_action_v0['power'][(t, i)] for i in range(5)]}")
