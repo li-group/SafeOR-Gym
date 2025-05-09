@@ -23,15 +23,6 @@ from typing import Any
 import torch
 import matplotlib.pyplot as plt
 
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(current_dir, 'asu_config.json')
-# Open the configuration file using the computed path
-with open(config_path, 'r') as config_file:
-    ASUEnv_DATA_FILES = json.load(config_file)
-
-### MAKE ONLY 1 JSON FILE ###
-
 class ASUEnv(gym.Env):
 
     """
@@ -56,14 +47,17 @@ class ASUEnv(gym.Env):
             - Demand shortfall at the end of the day.
 
     """
-    # _CONFIG_SCHEMA = {
-    #     "demand": list,
-    #     "electricity_prices": list,
-    #     "compressors": list, 
-    # }  # FIX THIS HERE for ASUEnv
+    _CONFIG_SCHEMA = {
+        "demand": dict,         # Outer: str(int), Inner: dict of products with float values
+        "price": dict,          # Outer: str(int), Inner: dict of hours with float values
+        "products": list,       # List of product strings: ['LIN', 'LOX', 'LAR']
+        "IV_u": dict,           # Dict of product: float (max inventory)
+        "fixed_cost": list,     # List with one float (e.g., [36])
+        "dynamic_cost": list,   # List with one float (e.g., [0.24192])
+        "IV_i": dict,           # Dict of product: float (initial inventory)
+        "liq_prod_data": dict   # Dict: {product -> {str(int) -> float}}
+    }
 
-
-    # def __init__(self, asu_name, lookahead, days_to_simulate):
     def __init__(self, env_id: str, **kwargs: Any) -> None:
 
         self.name = env_id
@@ -76,6 +70,12 @@ class ASUEnv(gym.Env):
 
         self.env_id = env_id
         self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
+
+        self.config_path = kwargs.get("config_path", None)
+        if self.config_path is None:
+            raise ValueError("config_path must be provided for ASUEnv.")
+        self.config_data = self._load_config() 
+        self.assign_env_config(self.config_data)
 
         # Simulation time counters
         self.current_hour = 0  # hour in current day (0-23)
@@ -106,10 +106,10 @@ class ASUEnv(gym.Env):
             return json.load(f)
 
     def assign_env_config(self, kwargs):
-        print("Assigning configuration...")
-        print(len(kwargs), "kwargs")
+        # print("Assigning configuration...")
+        # print(len(kwargs), "kwargs")
         for key, value in kwargs.items():
-            print(f"Trying to set {key} to {value!r}")
+            # print(f"Trying to set {key} to {value!r}")
             # 1) ensure it's in the schema
             if key not in self._CONFIG_SCHEMA:
                 raise AttributeError(f"{self!r} has no config attribute '{key}'")
@@ -121,51 +121,27 @@ class ASUEnv(gym.Env):
                     f"got {type(value).__name__}"
                 )
             # 3) finally setattr
-            print(f"Setting {key} to {value!r}")
+            # print(f"Setting {key} to {value!r}")
             setattr(self, key, value)
 
     def _initialize_simulation_data(self):
-        # Electricity simulation
-        data_simulation_days = 31
-        electricity_simulator = Get_electricity_dataframe(data_simulation_days + np.maximum(0, self.T - data_simulation_days), self.name)
-        price_df = electricity_simulator.simulate_electricity_prices()
-        # electricity_simulator.get_electricity_plot()
-        # Create new columns for the day and the hour (adding 1 to the hour so it goes from 1 to 24)
-        price_df['day'] = price_df['Timestamp'].dt.day
-        price_df['hour'] = price_df['Timestamp'].dt.hour + 1
-        # Group by day and create a nested dictionary for each day's prices
-        price_dict = {
-            day: dict(zip(group['hour'], group['Electricity_Price']))
-            for day, group in price_df.groupby('day')
+        # Convert string keys to integers
+        self.dict_demand = {int(k): v for k, v in self.config_data["demand"].items()}
+        self.dict_prices  = {
+            int(day): {int(hour): price for hour, price in day_dict.items()}
+            for day, day_dict in self.config_data["price"].items()
         }
-        self.dict_prices = price_dict
-
-        # Demand simulation
-        demand_simulator =  Get_demand_dataframe(data_simulation_days + np.maximum(0, self.T - data_simulation_days), self.name)
-        demand_df = demand_simulator.simulate_daily_target_demand() 
-        # demand_simulator.get_demand_plot()
-        demand_dict = {i + 1: row.to_dict() for i, (date, row) in enumerate(demand_df.iterrows())}
-        self.dict_demand = demand_dict
+        # return self.dict_prices, self.dict_demand
 
     def _initialize_params(self):
         """Load configuration and operational parameters."""
-        
-        data_file = ASUEnv_DATA_FILES.get(self.env_id)
-        if data_file is None:
-            raise ValueError(f"Unknown ASU identifier: {self.env_id}")
-        with open(data_file, 'r') as file:
-            self.loaded_data = json.load(file)
+        self.products = self.config_data["products"]        # e.g., ['LIN', 'LOX', 'LAR']
+        self.IV_u = self.config_data["IV_u"]                # Maximum inventory capacities
+        self.fixed_cost = self.config_data["fixed_cost"][0]
+        self.unit_prod_cost = self.config_data["dynamic_cost"][0]
+        self.IV_i = self.config_data["IV_i"]                # Initial inventory levels
+        # return self.products, self.IV_u, self.fixed_cost, self.unit_prod_cost, self.IV_i
 
-        # Set parameters from the loaded data file
-        self.products = self.loaded_data['products']  # e.g., ['LIN', 'LOX', 'LAR']
-        self.IV_u = self.loaded_data['IV_u']           # Maximum inventory capacities
-        self.IV_l = self.loaded_data['IV_l']
-        self.IV_f = self.loaded_data['IV_f']
-        self.fixed_cost = self.loaded_data['fixed_cost'][0]
-        self.unit_prod_cost = self.loaded_data['dynamic_cost'][0]
-        self.IV_i = self.loaded_data['IV_i']           # Initial inventory levels
-        self.total_hours = self.loaded_data['total_hours'][0]
-    
     def _initialize_observation_space(self):
         self.reset()
         """Define the observation space as a single Box."""
@@ -194,7 +170,8 @@ class ASUEnv(gym.Env):
         max_quantities = np.array([self.IV_u[prod] for prod in self.products], dtype=np.float32)
 
         ### Data preprocessing to yield Convex Hull ###
-        liq_prod_data = self.loaded_data['liq_prod_data']
+        # liq_prod_data = self.loaded_data['liq_prod_data']
+        liq_prod_data = self.config_data["liq_prod_data"]
             # Convert liq_prod_data to a list of tuples
         points = [(liq_prod_data['LIN'][i], liq_prod_data['LOX'][i], liq_prod_data['LAR'][i]) for i in liq_prod_data['LIN']]
         # Compute the convex hull
@@ -209,7 +186,6 @@ class ASUEnv(gym.Env):
         high=1.0,
         shape=(self.row_liqprod,),  # Number of convex hull vertices
         dtype=np.float32)
-
 
     def _initialize_state(self):
         """Initialize the state with default values."""
@@ -229,12 +205,14 @@ class ASUEnv(gym.Env):
 
         self.update_demand_and_electricty_state()
         self.update_physical_state()
-            
 
     def get_demand_and_el_states_for_the_day(self):
+
         start_day = self.current_day + 1
         selected_days = range(start_day, start_day + self.lookahead_days + 1)
-        
+        # print(f"start_day = {start_day}")
+        # print(f"Available days = {list(self.dict_demand.keys())}")
+
         product_demand = {}
         product_demand = {
             product: {day: self.dict_demand[day][product] for day in selected_days}
@@ -254,8 +232,6 @@ class ASUEnv(gym.Env):
         if self.current_hour == 0 and self.current_day == 0:
             # Initialize the inventory state at the start of the first day
             self.IV = np.array([self.IV_i[prod] for prod in self.products], dtype=np.float32)
-        # else:
-        #     self.IV = new_IV.copy()
 
         self.state['IV'] = self.IV 
 
@@ -287,6 +263,7 @@ class ASUEnv(gym.Env):
                 # For the first day (d == current_day), the 24th hour is at index 23 (0-indexed).
                 # For subsequent days, it is (d - current_day + 1) * 24 - 1.
                 # hour_index = (d - self.current_day + 1) * 24 - 1   # OLD
+                # hour_index = (d - self.current_day) * 24 - 1
                 hour_index = (d - self.current_day) * 24 - 1
                 # Retrieve the demand value for product 'prod' on day d. Default to 0 if missing.
                 demand_value = product_demand.get(prod, {}).get(d, 0)
@@ -309,7 +286,6 @@ class ASUEnv(gym.Env):
         # if self.current_hour == 0:
         self.demand_today = self.state['demand'][:, 23]  # Demand forecast for the current day (for each product) # Check demand for the present day: the 24th hour in the shifted demand array (index 23)
         
-
     def shift_observation(self):
         """
         Shift the current observation based on the number of hours elapsed in the current day.
@@ -378,15 +354,13 @@ class ASUEnv(gym.Env):
         return inventory_penalty
     
     def sanitize_action(self, inventory_penalty):
-
         """
         Sanitize the action to prevent tank overflow.
         If the action leads to an inventory level exceeding IV_u, adjust the action.
         """
+        # update self.IV to respect the upper bound
         if inventory_penalty > 0:
-            # update self.IV to respect the upper bound
             self.IV = np.minimum(self.IV, self.iv_high)
-
 
     def update_information_state(self):
         """
