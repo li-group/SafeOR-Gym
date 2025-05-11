@@ -84,9 +84,11 @@ def main(args, env_id):
     eg = ExperimentGrid(exp_name = 'Benchmark_Safety_rtn_v0')
 
     base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
-    naive_lagrange_policy = ['PPOLag', 'TRPOLag', 'RCPO']
-    first_order_policy = ['CUP', 'FOCOPS', 'P3O']
-    second_order_policy = ['CPO']#, 'PCPO']
+    naive_lagrange_policy = ['TRPOLag'] #['PPOLag', 'TRPOLag', 'RCPO']
+    first_order_policy = ['P3O'] #['CUP', 'FOCOPS', 'P3O']
+    second_order_policy = ['CPO']
+    primal_policy = ['OnCRPO']
+    offline_policy = ['DDPGLag']
 
     mujoco_envs = [
         'rtn-v0'
@@ -101,13 +103,13 @@ def main(args, env_id):
         gpu_id = None
 
     T = 10 if args.env_config == "easy_environment_data.json" else 30
-    STEPS_PER_EPOCH = T * 8
+    STEPS_PER_EPOCH = T * 128
     TOTAL_EPOCHS = 1000
     TOTAL_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS
 
     eg.add('seed', [args.seed])
     
-    eg.add('algo', second_order_policy)
+    eg.add('algo', second_order_policy + naive_lagrange_policy + first_order_policy + primal_policy + offline_policy)
     
     eg.add('logger_cfgs:use_wandb', [False])
     eg.add('logger_cfgs:use_tensorboard', [True])
