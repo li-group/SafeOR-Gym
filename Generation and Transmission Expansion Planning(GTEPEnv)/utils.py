@@ -126,7 +126,7 @@ def flatten_dict(dictionary, parent_key='', separator=';'):
         if isinstance(key, tuple):
             key = '_'.join(map(str, key))  # Convert tuple to string format (e.g., ('a', 'b') -> 'a_b')
 
-        new_key = parent_key + separator + str(key) if parent_key else key
+        new_key = parent_key + separator + key if parent_key else key
 
         if isinstance(value, dict):
             # If the value is a dictionary (including empty ones), recurse
