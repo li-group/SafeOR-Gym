@@ -25,4 +25,15 @@ If you find SafeOR-Gym useful, please cite it in your publication
 > }
 > ```
 
+---
 
+## 📖 Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Folder Structure](#folder-structure)
+- [Implemented Algorithms](#implemented-algorithms)
+- [Environments](#environments)
+- [Citing This Work](#citing-this-work)
+
+---
