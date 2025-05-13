@@ -27,7 +27,6 @@ def create_energy_storage_model(env):
     # For Each Transmission Line
     model.b = pyo.Param(model.L, initialize=env.LineSusceptance)   # Susceptance
     model.p_limit = pyo.Param(model.L, initialize=env.LinePowerFlowLimit)  # Power flow limit
-    model.r = pyo.Param(model.L, model.T, initialize=env.WildfireRisk)   # Wildfire Risk (unitless)
     model.delta_up = pyo.Param(model.L, initialize=env.LineUpperVoltageAngle)  # Voltage angle upper bound
     model.delta_low = pyo.Param(model.L, initialize=env.LineLowerVoltageAngle) # Voltage angle lower bound
 
@@ -47,9 +46,6 @@ def create_energy_storage_model(env):
     
     model.eff = pyo.Param(initialize=env.ChargeEfficiency)      # Charging/discharging efficiency (e)
     model.h = pyo.Param(initialize=env.CarryOverRate)             # Hourly carryover rate (to model self-discharge)
-    model.x_max = pyo.Param(initialize=env.MaxBatteriesAllowed)     # Maximum batteries allowed at a bus
-    model.x_total = pyo.Param(initialize=env.TotalBatteries)          # Maximum total batteries in the network
-
     # Generator cost (polynomial) parameters: assume degree is provided
     model.J = pyo.RangeSet(0, env.PolynomialDegree - 1)  
     # Parameter c[g,j] is the coefficient for generator g for term j
@@ -67,7 +63,7 @@ def create_energy_storage_model(env):
     model.power = pyo.Var(model.G, model.T, bounds=power_bounds)
     
     # Slack generation at bus (to ensure feasibility), with a high upper bound.
-    model.gslack = pyo.Var(model.N, model.T, bounds=(0, 10000))
+    model.gslack = pyo.Var(model.N, model.T, bounds=(0, env.smax))
     
     # Voltage angle at each bus (in radians)
     model.theta = pyo.Var(model.N, model.T, domain=pyo.Reals)
@@ -89,15 +85,26 @@ def create_energy_storage_model(env):
     
     # Battery-related variables:
     # Number of batteries placed at each bus (investment decision; assumed continuous here; round as needed)
-    model.x = pyo.Var(model.N, bounds=(0, model.x_max))
     # Charging rate at bus n and time t
-    model.p_c = pyo.Var(model.N, model.T, domain=pyo.Reals)
+    def charge_bounds(m,n,t):
+        return (m.p_c_low[n], m.p_c_up[n])
+    model.p_c = pyo.Var(model.N, model.T, bounds=charge_bounds)
+
     # Discharging rate at bus n and time t
-    model.p_d = pyo.Var(model.N, model.T, domain=pyo.Reals)
+    def discharge_bounds(m,n,t):
+        return (m.p_d_low[n], m.p_d_up[n])
+    model.p_d = pyo.Var(model.N, model.T, bounds=discharge_bounds)
+
     # State-of-charge (SOC) of batteries at bus n at time t; note index over T, not "t"
     model.E = pyo.Var(model.N, model.T, domain=pyo.Reals)
 
     # Define Constraints
+
+    ref_bus = env.Buses[0]
+
+    def reference_bus_rule(m, t):
+        return m.theta[ref_bus, t] == 0      # pins the angle exactly
+    model.ReferenceBusAngle = pyo.Constraint(model.T, rule=reference_bus_rule)
 
     # --- Voltage Angle Bounds ---
     def voltage_angle_low_cons(model, n_fr, n_to, t):
@@ -120,7 +127,7 @@ def create_energy_storage_model(env):
     def power_flow_low_cons(model, n_fr, n_to, t):
         l = (n_fr, n_to)
         if l not in model.L_off:
-            return model.p_l[l, t] <= -model.b[l] * (model.theta[n_fr, t] - model.theta[n_to, t])
+            return model.p_l[l, t] <= model.b[l] * (model.theta[n_fr, t] - model.theta[n_to, t])
         else:
             return pyo.Constraint.Skip
     model.power_flow_cons_low = pyo.Constraint(model.L, model.T, rule=power_flow_low_cons)
@@ -128,51 +135,23 @@ def create_energy_storage_model(env):
     def power_flow_up_cons(model, n_fr, n_to, t):
         l = (n_fr, n_to)
         if l not in model.L_off:
-            return model.p_l[l, t] >= -model.b[l] * (model.theta[n_fr, t] - model.theta[n_to, t])
+            return model.p_l[l, t] >= model.b[l] * (model.theta[n_fr, t] - model.theta[n_to, t])
         else:
             return pyo.Constraint.Skip
     model.power_flow_cons_up = pyo.Constraint(model.L, model.T, rule=power_flow_up_cons)
 
-    # --- Total Battery Placement Constraint ---
-    # Ensure that the sum of batteries installed across all buses does not exceed x_total.
-    def total_batteries_cons(model):
-        return sum(model.x[n] for n in model.N) <= model.x_total
-    model.Total_Batteries_Cons = pyo.Constraint(rule=total_batteries_cons)
-
     # --- State-of-Charge (SOC) Balance Constraint ---
     def SOC_Balance_Cons(model, n, t):
-        if t == model.T.first():
-            return model.E[n, t] == model.h * model.E_o[n] + model.eff * model.p_c[n, t] - (1 / model.eff) * model.p_d[n, t]
-        else:
-            return model.E[n, t] == model.h * model.E[n, t-1] + model.eff * model.p_c[n, t] - (1 / model.eff) * model.p_d[n, t]
+        prev = model.E[n, t-1] if t>model.T.first() else model.E_o[n]
+        return model.E[n, t] == model.h*prev + model.eff*model.p_c[n,t] - (1/model.eff)*model.p_d[n,t]
     model.SOC_Balance_Cons = pyo.Constraint(model.N, model.T, rule=SOC_Balance_Cons)
 
-    # --- SOC Bounds Constraint ---
-    def SOC_Bounds_low_Cons(model, n, t):
-        return model.E[n, t] >= model.x[n] * model.e_low[n]
-    model.SOC_Bounds_low_Cons = pyo.Constraint(model.N, model.T, rule=SOC_Bounds_low_Cons)
-
-    def SOC_Bounds_up_Cons(model, n, t):
-        return model.E[n, t] <= model.x[n] * model.e_up[n]
-    model.SOC_Bounds_up_Cons = pyo.Constraint(model.N, model.T, rule=SOC_Bounds_up_Cons)
-
-    # --- Battery Charge Rate Constraints ---
-    def Charge_low_Cons(model, n, t):
-        return model.p_c[n, t] >= model.p_c_low[n] * model.x[n]
-    model.Charge_low_Cons = pyo.Constraint(model.N, model.T, rule=Charge_low_Cons)
-
-    def Charge_up_Cons(model, n, t):
-        return model.p_c[n, t] <= model.p_c_up[n] * model.x[n]
-    model.Charge_up_Cons = pyo.Constraint(model.N, model.T, rule=Charge_up_Cons)
-
-    # --- Battery Discharge Rate Constraints ---
-    def Discharge_low_Cons(model, n, t):
-        return model.p_d[n, t] >= model.p_d_low[n] * model.x[n]
-    model.Discharge_low_Cons = pyo.Constraint(model.N, model.T, rule=Discharge_low_Cons)
-
-    def Discharge_up_Cons(model, n, t):
-        return model.p_d[n, t] <= model.p_d_up[n] * model.x[n]
-    model.Discharge_up_Cons = pyo.Constraint(model.N, model.T, rule=Discharge_up_Cons)
+    def SOC_low(model, n, t):
+        return model.E[n,t] >= model.e_low[n]
+    def SOC_high(model, n, t):
+        return model.E[n,t] <= model.e_up[n]
+    model.SOC_low = pyo.Constraint(model.N, model.T, rule=SOC_low)
+    model.SOC_high= pyo.Constraint(model.N, model.T, rule=SOC_high)
 
     # --- Power Balance Constraint ---
     # For each bus and time period, the net injection must match the difference between flows leaving and entering.
@@ -188,11 +167,10 @@ def create_energy_storage_model(env):
     # (a) Generation cost (modeled as a polynomial function for each generator),
     # (b) Load-shedding penalty (Kls per unit of unmet demand),
     # (c) Slack generation penalty (Kslack per unit).
-    def objective_rule(model):
-        gen_cost = sum(model.c[g, j] * model.power[g, t]**j for t in model.T for g in model.G for j in model.J)
-        load_shed_cost = sum(model.Kls * model.p_ls[n, t] for t in model.T for n in model.N)
-        slack_cost = sum(model.Kslack * model.gslack[n, t] for t in model.T for n in model.N)
-        return gen_cost + load_shed_cost + slack_cost
-    model.obj = pyo.Objective(rule=objective_rule, sense=pyo.minimize)
+    def obj_rule(m):
+        return sum(m.c[g,j]*m.power[g,t]**j for t in m.T for g in m.G for j in m.J) \
+                + sum(m.Kls*m.p_ls[n,t] + m.Kslack*m.gslack[n,t] \
+                for t in m.T for n in m.N)
+    model.obj = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
 
     return model

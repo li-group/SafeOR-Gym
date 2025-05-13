@@ -6,7 +6,7 @@ Multi-Echelon Inventory Management Environment
 '''
 # export PATH="$CONDA_PREFIX/bin:$PATH"
 
-
+# Import Libraries
 import numpy as np
 import gymnasium as gym
 from gymnasium.spaces.utils import flatten_space
@@ -19,65 +19,63 @@ import json, os
 from pathlib import Path
 
 
-
 class InvMgmtEnv(gym.Env):
-    """
-    ------------------------------------------------------------------
-    Multi-Echelon Inventory-Management Environment
-    ------------------------------------------------------------------
+    '''
+    Multi-Echelon Inventory Management Environment
 
     Problem Description
-       This environment represents a five-layer supply chain containing
-       markets, retailers, distributors, producers, and raw-material
-       distributors.  During every period the decision-maker chooses
-       continuous reorder quantities on each transportation route.  
-       Orders travel through fixed lead times, replenish on-hand stock,
-       satisfy stochastic customer demand, and may create backlogs.
-       After receiving the orders, the simulator
-         • updates all on-hand and pipeline inventories,  
-         • realises market demand and fulfils it if inventory is available,  
-         • carries forward any unfulfilled demand as backlog, and  
-         • computes the net profit (revenues minus costs and penalties)  
-       which is returned as the step reward.
-       [ add citation here ]
+        This environment represents a five‐tier supply chain—markets, retailers,
+        distributors, producers, and raw‐material suppliers—where each period the
+        agent chooses continuous reorder quantities on every transportation route.
+        Orders travel through fixed lead times, replenish on‐hand stock, satisfy
+        stochastic customer demand, and may create backlogs. After order arrivals:
+          • On‐hand and pipeline inventories are updated.
+          • Market demand is realized and sales occur if inventory permits.
+          • Unfulfilled demand rolls into backlogs.
+          • Net profit (sales minus procurement, operating, holding, penalty costs)
+            is computed as the step reward.
 
-    Observation Space
-       The flattened observation vector contains, in this order:
-         • On-hand inventory for every inventory-holding node.  
-         • Pipeline inventory for each reordering route, one element
-           per period of that route’s lead time (first in transit, second
-           in transit, …).  
-         • For each retailer-to-market link: sales made this period,
-           backlog carried to next period, realised demand.  
-         • Scaled time index (current period divided by total horizon).
-       The length of the vector equals:
-         number of main nodes
-         + total pipeline slots across all routes
-         + three times the number of retailer routes
-         + one time-index element.
+    State space:
+        A dictionary with keys:
+          - on_hand_inventory: node → current inventory level
+          - pipeline_inventory: (i,j) → list of in‐transit quantities (one per lead time slot)
+          - sales: (retailer, market) → units sold this period
+          - backlog: (retailer, market) → unfulfilled demand carried forward
+          - demand_window: (retailer, market) → lookahead demand for next periods
+          - t: current time period
+        Flattened into a single array for the observation space.
 
-    Action Space
-       A flat Box whose length equals the number of reordering routes.
-       The agent supplies a value in the range −1 to 1 for every route;
-       the environment rescales that to a physical order quantity between
-       zero and the pre-defined capacity of that route.  Values below a
-       small threshold are treated as zero.
+    Action space:
+        A dict with one key:
+          - reorder: continuous Box in [–1,1]^R (R = number of reordering routes)
+        Each entry is linearly scaled to [0, capacity] for that route; values
+        below eps are zeroed.
 
-    Key Environment Parameters (all can be overridden via **kwargs)
-         • T – planning horizon in periods  
-         • inv_capacity – storage capacity at each node  
-         • initial_inv – starting on-hand inventory  
-         • inventory_holding_cost – per-unit per-period cost  
-         • operating_cost and production_yield for producer nodes  
-         • material_holding_cost – cost for inventory in transit  
-         • unit_price – wholesale or retail selling price per route  
-         • lead_times – integer shipping lags per route  
-         • reordering_route_capacity – maximum order size per route  
-         • demand_parameters – mean, standard deviation, seed for demand  
-         • unfulfilled_utility_penalty – cost per unit of backlog  
-         • P – large constant added to every quadratic penalty term  
-         • eps – numerical threshold below which orders are treated as zero
-    """
+    Transition to next state:
+        Pipeline flows advance by one period, on‐hand inventories and backlogs
+        are updated based on arrivals, sales, and unmet demand, and new demand
+        is sampled for the lookahead window.
+
+    Cost:
+        Quadratic penalties on actions outside [0, capacity] and on observation
+        violations (inventory, pipeline, sales, backlog, demand).
+
+    Reward:
+        Net profit for the period = sales revenue
+           – procurement cost
+           – operating cost
+           – holding cost (on‐hand + pipeline)
+           – backlog penalty
+        Minus any constraint penalties yields the step reward.
+
+    Starting State:
+        All on‐hand and pipeline inventories zero except initial_inv;
+        backlogs and sales zero; demand window zero; t = 0.
+
+    Termination:
+        Episode ends when t reaches T.
+    '''
+
     _CONFIG_SCHEMA = {
         "T": int,
         "num_markets": int,
@@ -102,16 +100,16 @@ class InvMgmtEnv(gym.Env):
 
     def __init__(self, env_id: str = 'InvMgmt-v0', **kwargs):
         """
-        Initialize the environment by setting defaults, applying overrides,
-        building spaces, and resetting to the initial state.
+        Initialize the environment by setting defaults, applying environment configuration, resetting to the initial state, and
+        building action and observation spaces.
 
         Parameters
         ----------
         env_id : str
             Identifier for the environment variant.
         **kwargs
-            Keyword arguments to override default configuration attributes.
-
+            config_path : str
+            (Path to the JSON configuration file)
         """
         super().__init__()
         self._device = 'cuda' if th.cuda.is_available() else 'cpu'
@@ -141,6 +139,14 @@ class InvMgmtEnv(gym.Env):
         self.num_total_nodes =  self.num_markets + self.num_retailers + self.num_distributors + self.num_producers + self.num_raw_distributors
 
         self.lookahead_horizon = int(math.ceil(self.T / 10))
+        
+        self.raw_distributors = list(range(
+        self.num_markets + self.num_retailers + self.num_distributors +
+        self.num_producers,
+        self.num_markets + self.num_retailers + self.num_distributors +
+        self.num_producers + self.num_raw_distributors
+        ))
+
 
 
         # Threshold and penalty factors
@@ -149,12 +155,12 @@ class InvMgmtEnv(gym.Env):
         # Penalty *factors* (one per category)
         # These will multiply diff**2
         self.penalty_factors = {
-            'action':             1e4,
-            'on_hand_inventory':  1e2,
-            'pipeline_inventory': 1e2,
-            'sales':              1e2,
-            'backlog':            1e2,
-            'demand_window':      1e2
+            'action':             1e2,
+            'on_hand_inventory':  1e1,
+            'pipeline_inventory': 1e1,
+            'sales':              1e1,
+            'backlog':            1e1,
+            'demand_window':      1e1
         }
 
 
@@ -167,24 +173,24 @@ class InvMgmtEnv(gym.Env):
             'Num action above capacity':               0,
 
             # on‐hand inventory violations
-            'Total penalty: On-hand Inventory':        0,
-            'Num On-hand Inventory violations':        0,
+            'Total penalty: on_hand_inventory':        0,
+            'Num on_hand_inventory violations':        0,
 
             # pipeline inventory violations
-            'Total penalty: Pipeline Inventory':       0,
-            'Num Pipeline Inventory violations':       0,
+            'Total penalty: pipeline_inventory':       0,
+            'Num pipeline_inventory violations':       0,
 
             # sales violations
-            'Total penalty: Sales':                    0,
-            'Num Sales violations':                    0,
+            'Total penalty: sales':                    0,
+            'Num sales violations':                    0,
 
             # backlog violations
-            'Total penalty: Backlog':                  0,
-            'Num Backlog violations':                  0,
+            'Total penalty: backlog':                  0,
+            'Num backlog violations':                  0,
 
             # demand‐window violations
-            'Total penalty: Demand Window':            0,
-            'Num Demand Window violations':            0,
+            'Total penalty: demand_window':            0,
+            'Num demand_window violations':            0,
 
             # summary stats
             'num_steps':       0,
@@ -199,14 +205,6 @@ class InvMgmtEnv(gym.Env):
         self.reset()
 
         # Define observation and action spaces
-        # obs_size = (
-        #     len(self.main_nodes)
-        #     + sum(self.lead_times[rt] for rt in self.reordering_routes)
-        #     + 2 * len(self.retailer_routes)     # sales + backlog
-        #     + self.lookahead_horizon * len(self.retailer_routes)
-        #     + 1  # time-index
-        #             )
-
         obs_sample = self._get_state()
         obs_dim = len(obs_sample)
 
@@ -221,13 +219,6 @@ class InvMgmtEnv(gym.Env):
             shape=(obs_dim,),
             dtype=np.float32
             )
-
-        # act_low = np.zeros(len(self.reordering_routes), dtype=np.float32)
-        # act_high = np.array([
-        #     self.reordering_route_capacity[rt] for rt in self.reordering_routes
-        # ], dtype=np.float32)
-        # self.raw_action_space = gym.spaces.Box(act_low, act_high, dtype=np.float32)
-        # self.action_space = flatten_space(self.raw_action_space)
 
         # actions in [-1,1]
         act_dim = len(self.reordering_routes)
@@ -348,7 +339,6 @@ class InvMgmtEnv(gym.Env):
             self.state['backlog'][rt] = 0.0
 
         # Demand window: initialize lookahead zeros
-        # (requires self.lookahead_horizon defined in __init__)
         for rt in self.retailer_routes:
             self.state['demand_window'][rt] = [0.0] * self.lookahead_horizon
 
@@ -371,14 +361,6 @@ class InvMgmtEnv(gym.Env):
                 action_dict[rt] = 0.0
         return action_dict
 
-    # def update_dem(self):
-    #     """
-    #     Realize new demand for retailers at current time step.
-    #     """
-    #     if 1 <= self.t < self.T:
-    #         for rt in self.retailer_routes:
-    #             self.Dd[rt][self.t] = self.demand[rt][self.t - 1]
-
     def update_dem(self):
         """
         Populate self.Dd[rt][k] for k in [t, t+1, …, t+lookahead_horizon], clipped to [1, T].
@@ -388,64 +370,63 @@ class InvMgmtEnv(gym.Env):
             start = max(1, self.t)
             end   = min(self.T, self.t + self.lookahead_horizon)
             
-            # demand[rt] is length T, indexed 0…T-1; self.Dd[rt] is length T+1, indexed 0…T
-            # We want to write demand[rt][start-1 : end] into Dd[rt][start : end+1]
             self.Dd[rt][start:end+1] = self.demand[rt][start-1:end]
 
 
-    def check_action_bounds_cost(self, action_dict, pens_step):
+    def check_action_bounds_cost(self, action_dict):
+        """
+        Check if actions are within bounds and apply penalties if not.
+        """
+
+        action_penalty = 0.0
         for rt, val in action_dict.items():
             if val < 0.0:
                 diff    = -val
-                penalty = diff**2 * self.penalty_factors['action']
-                pens_step['Total penalty: Action below zero'] += penalty
-                pens_step['Num action below zero']            += 1
+                penalty_low = diff * self.penalty_factors['action']
+                action_penalty += penalty_low
+                self.pens_step['Total penalty: Action below zero'] += penalty_low
+                self.pens_step['Num action below zero']            += 1
                 action_dict[rt] = 0.0
 
             cap = self.reordering_route_capacity[rt]
             if val > cap:
                 diff    = val - cap
-                penalty = diff**2 * self.penalty_factors['action']
-                pens_step['Total penalty: Action above capacity'] += penalty
-                pens_step['Num action above capacity']            += 1
+                penalty_high = diff * self.penalty_factors['action']
+                action_penalty += penalty_high
+                self.pens_step['Total penalty: Action above capacity'] += penalty_high
+                self.pens_step['Num action above capacity']            += 1
                 action_dict[rt] = cap
 
-        return action_dict, pens_step['Total penalty: Action below zero'] \
-                           + pens_step['Total penalty: Action above capacity']
+        return action_dict, action_penalty
     
-    def check_obs_bounds_cost(self, next_obs, pens_step):
+    def check_obs_bounds_cost(self, next_obs):
+        """
+        Check if observations are within bounds and apply penalties if not.
+        """
         low, high = self.observation_space.low, self.observation_space.high
-        cat_map = {
-            'on_hand_inventory':  ('On-hand Inventory',  'on_hand_inventory'),
-            'pipeline_inventory': ('Pipeline Inventory', 'pipeline_inventory'),
-            'sales':              ('Sales',              'sales'),
-            'backlog':            ('Backlog',            'backlog'),
-            'demand_window':      ('Demand Window',      'demand_window'),
-        }
-
         total_obs_penalty = 0.0
         clipped = next_obs.copy()
 
         for i, x in enumerate(next_obs):
-            cat, key = self.mapping_obs[i]
-            if cat not in cat_map:
+            cat, _ = self.mapping_obs[i]
+            # only penalize known categories
+            if cat not in self.penalty_factors:
                 continue
-            human, attr = cat_map[cat]
-            pf          = self.penalty_factors[attr]
+            pf = self.penalty_factors[cat]
 
             if x < low[i]:
-                diff    = low[i] - x
-                penalty = diff**2 * pf
-                pens_step[f'Total penalty: {human}']  += penalty
-                pens_step[f'Num {human} violations']  += 1
+                diff = low[i] - x
+                penalty = diff * pf
+                self.pens_step[f'Total penalty: {cat}'] += penalty
+                self.pens_step[f'Num {cat} violations'] += 1
                 clipped[i] = low[i]
                 total_obs_penalty += penalty
 
             elif x > high[i]:
-                diff    = x - high[i]
-                penalty = diff**2 * pf
-                pens_step[f'Total penalty: {human}']  += penalty
-                pens_step[f'Num {human} violations']  += 1
+                diff = x - high[i]
+                penalty = diff * pf
+                self.pens_step[f'Total penalty: {cat}'] += penalty
+                self.pens_step[f'Num {cat} violations'] += 1
                 clipped[i] = high[i]
                 total_obs_penalty += penalty
 
@@ -453,44 +434,113 @@ class InvMgmtEnv(gym.Env):
 
     def calculate_reward(self):
         """
-        Compute the net cost (holding + operating + pipeline + backlog - sales) and
-        set self.total_cost accordingly.
+        Compute per-period profit:
+          • revenue (shipments + sales)
+          • minus procurement cost
+          • minus operating cost
+          • minus holding cost (on-hand + pipeline)
+          • minus unfulfilled-demand penalty (only for t>=2)
+        Returns the net profit for this period.
         """
         t = self.t
-        inv_cost = op_cost = pipeline_cost = backlog_penalty = total_sales = 0.0
-        for idx, node in enumerate(self.main_nodes):
-            inv_cost += self.I[t, idx] * self.inventory_holding_cost[node]
-            if node in self.operating_cost:
-                outflow = sum(self.R[(node,k)][t] for k in self.j_out.get(node, []))
-                op_cost += (outflow / self.production_yield[node]) * self.operating_cost[node]
-        for rt in self.reordering_routes:
-            pipeline_cost += self.Tt[rt][t] * self.material_holding_cost[rt]
-            total_sales += self.R[rt][t] * self.unit_price.get(rt, 0.0)
-        for rt in self.retailer_routes:
-            backlog_penalty += self.Bb[rt][t+1] * self.unfulfilled_utility_penalty.get(rt, 0.0)
-            total_sales += self.Ss[rt][t] * self.unit_price.get(rt, 0.0)
-        self.total_cost = (inv_cost + op_cost + pipeline_cost + backlog_penalty) - total_sales
-    
+
+        # 1) Revenue: shipments on reordering_routes + sales on retailer_routes
+        revenue = sum(
+            self.R[rt][t] * self.unit_price.get(rt, 0.0)
+            for rt in self.reordering_routes
+            if rt[0] not in self.raw_distributors
+        ) + sum(
+            self.Ss[rt][t] * self.unit_price.get(rt, 0.0)
+            for rt in self.retailer_routes
+        )
+
+        # 2) Procurement cost: what you pay upstream this period
+        procurement = sum(
+            self.R[rt][t] * self.unit_price.get(rt, 0.0)
+            for rt in self.reordering_routes
+        )
+
+        # 3) Operating cost (producers only)
+        operating = sum(
+            (sum(self.R[(node, k)][t] for k in self.j_out.get(node, []))
+             / self.production_yield[node])
+            * self.operating_cost[node]
+            for node in self.operating_cost
+        )
+
+        # 4) Holding cost: on-hand + pipeline
+        onhand_hc = sum(
+            self.I[t, idx] * self.inventory_holding_cost[node]
+            for idx, node in enumerate(self.main_nodes)
+        )
+        pipeline_hc = sum(
+            self.Tt[rt][t] * self.material_holding_cost[rt]
+            for rt in self.reordering_routes
+        )
+        holding = onhand_hc + pipeline_hc
+
+        # 5) Unfulfilled‐demand penalty (use backlog carried into this period)
+        if t >= 2:
+            backlog_pen = sum(
+                self.Bb[rt][t] * self.unfulfilled_utility_penalty.get(rt, 0.0)
+                for rt in self.retailer_routes
+            )
+        else:
+            backlog_pen = 0.0
+
+        # 6) Net profit
+        return revenue - procurement - operating - holding, backlog_pen
+
     def set_seed(self, seed: int):
+        """
+        Set the random seed for reproducibility.
+        Parameters
+        ----------
+        seed : int
+            The random seed to set.
+        """
+
         random.seed(seed)
         np.random.seed(seed)
         th.manual_seed(seed)
 
     @property
     def max_episode_steps(self) -> int:
+        """
+        Maximum number of steps in an episode.
+        Returns
+        -------
+        int
+            Maximum number of steps in an episode.
+        """
+        
         return self.T
 
     def step(self, raw_action):
         """
-        Apply an action to the environment and advance one time step,
-        with per-step logging and aggregation into self.env_spec_log.
+        Execute one time step within the environment.
+        Parameters
+        ----------
+        raw_action : np.ndarray or dict
+            The action to take, either as a NumPy array or a dictionary.
+        Returns
+        -------
+        obs_tensor : th.Tensor
+            The observation tensor after taking the action.
+        reward_tensor : th.Tensor
+            The reward tensor after taking the action.
+        done_tensor : th.Tensor
+            A tensor indicating whether the episode has terminated.
+        trunc_tensor : th.Tensor
+            A tensor indicating whether the episode has been truncated.
+        info : dict
+            Additional information about the environment state.
         """
+
         self.truncated = False
 
-        # reset costs for this step
-        self.total_cost = 0.0
         # per‐step log
-        pens_step = {k: 0 for k in self.env_spec_log}
+        self.pens_step = {k:0 for k in self.env_spec_log.keys()}
 
         # 1) decode action
         action = raw_action.numpy() if th.is_tensor(raw_action) else raw_action
@@ -509,7 +559,7 @@ class InvMgmtEnv(gym.Env):
         action_dict = self.sanitize_action(action_dict)
 
         # 3) check action bounds, log into pens_step
-        action_dict, action_penalty = self.check_action_bounds_cost(action_dict, pens_step)
+        action_dict, action_penalty = self.check_action_bounds_cost(action_dict)
 
         # 4) advance time and flows
         self.t += 1
@@ -566,9 +616,8 @@ class InvMgmtEnv(gym.Env):
         for rt in self.retailer_routes:
             self.Bb[rt][t+1] = self.Bb[rt][t] + self.Dd[rt][t] - self.Ss[rt][t]
 
-        # 5) compute pure cost
-        self.calculate_reward()   # sets self.total_cost
-        pure_cost = self.total_cost
+        # 5) Compute reward
+        reward, backlog_pen = self.calculate_reward()   # sets self.total_cost
 
         # 6) rebuild state dict
         self.state["t"] = t
@@ -586,7 +635,7 @@ class InvMgmtEnv(gym.Env):
             self.state["sales"][rt]   = float(self.Ss[rt][t])
             self.state["backlog"][rt] = float(self.Bb[rt][t])
 
-            # ————— Updated demand_window lookahead —————
+            # ————— Demand lookahead —————
             window = []
             for offset in range(self.lookahead_horizon):
                 future_t = t + offset
@@ -600,38 +649,36 @@ class InvMgmtEnv(gym.Env):
 
         # 7) flatten & log obs-bound violations
         flat_obs, self.mapping_obs = flatten_and_track_mappings(self.state)
-        clipped_obs, obs_penalty = self.check_obs_bounds_cost(flat_obs, pens_step)
+        clipped_obs, obs_penalty = self.check_obs_bounds_cost(flat_obs)
+
         self.flatt_state = clipped_obs
 
-        # 8) termination
-        if t >= self.T:
-            self.terminated = True
+        # 9) compute cost
+        cost = action_penalty + obs_penalty
 
-        # 9) compute total reward & cost for this step
-        step_cost   = action_penalty + obs_penalty
-        step_reward = - (pure_cost + step_cost)
-
-        self.reward = - pure_cost
-        self.reward_ep += - pure_cost
-        self.cost = step_cost
-        self.cost += step_cost
+        self.reward = reward - backlog_pen
+        self.reward_ep += self.reward
+        self.cost = cost
+        self.cost += self.cost
 
         # 10) summary stats
-        pens_step['num_steps']         += 1
-        pens_step['sum reward']        += step_reward
-        pens_step['sum reward square'] += step_reward**2
-        pens_step['sum cost']          += step_cost
-        pens_step['sum cost square']   += step_cost**2
-        if self.terminated:
-            pens_step['num_episodes']  += 1
+        self.pens_step['num_steps']         += 1
+        self.pens_step['sum reward']        += self.reward
+        self.pens_step['sum reward square'] += self.reward**2
+        self.pens_step['sum cost']          += self.cost
+        self.pens_step['sum cost square']   += self.cost**2
+
+        if self.t >= self.T:
+            self.pens_step['num_episodes']  += 1
+            self.terminated = True
 
         # 11) aggregate into master log
-        for k, v in pens_step.items():
-            self.env_spec_log[k] += v
+        for k in self.env_spec_log.keys():
+            self.env_spec_log[k] += self.pens_step[k]
 
         flat_obs = self.flatt_state  # numpy 1-D array
         obs_tensor   = th.tensor(flat_obs,   dtype=th.float32, device=self._device)
-        reward_tensor= th.tensor(- (pure_cost + step_cost), dtype=th.float32, device=self._device)
+        reward_tensor= th.tensor(reward - cost , dtype=th.float32, device=self._device)
         done_tensor  = th.tensor(self.terminated, dtype=th.bool,   device=self._device)
         trunc_tensor = th.tensor(self.truncated,  dtype=th.bool,   device=self._device)
 
@@ -650,6 +697,18 @@ class InvMgmtEnv(gym.Env):
         pass
 
     def load_config(self, path):
+        """
+        Load and preprocess the JSON configuration file.
+        Parameters
+        ----------
+        path : str
+            Path to the JSON configuration file.
+        Returns
+        -------
+        dict
+            Preprocessed configuration dictionary.
+        """
+        
         cfg = json.load(open(path))
 
         # 1) integer-keyed dicts
@@ -677,41 +736,3 @@ class InvMgmtEnv(gym.Env):
             cfg[name] = parse_tuple_dict(cfg[name])
 
         return cfg
-
-def main():
-
-    base_dir   = Path(__file__).resolve().parent
-    config_fp  = base_dir / "config.json"
-    if not config_fp.is_file():
-        raise FileNotFoundError(f"Couldn’t find config.json at {config_fp}")
-
-    # 1) load & preprocess your JSON config
-    # config = load_config("/Users/skompall/Project Files/OR Gym/config.json")   
-
-    # 2) instantiate
-    env = InvMgmtEnv(env_id='InvMgmt-v0', config_path= config_fp)
-
-    # 3) reset returns (obs_tensor, info_dict)
-    obs, info = env.reset()
-    print("Manual rollout start...")
-    
-    for i in range(3):
-        # 4) sample action (still a NumPy array)
-        action = env.action_space.sample()
-        
-        # 5) step returns 
-        #    (state_tensor, reward_tensor, done_tensor, truncated_tensor, info_dict)
-        obs, reward, done, truncated, info = env.step(action)
-        
-        # 6) you can still do:
-        print(f"Step {i+1}, obs shape={obs.shape}, reward={reward}, done={done}")
-
-        # 7) checking `done` on a scalar BoolTensor works:
-        if done:
-            obs, info = env.reset()
-            print("Episode reset")
-
-if __name__ == "__main__":
-    main()
-
-

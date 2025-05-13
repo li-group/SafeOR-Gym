@@ -1,4 +1,4 @@
-print("Running Supply Chain OmniSafe Script: Don't Worry")
+print("Running Battery Operation OmniSafe Script: Don't Worry")
 import warnings
 import torch
 from omnisafe.common.experiment_grid import ExperimentGrid
@@ -28,11 +28,11 @@ import os
 import numpy as np
 import omnisafe
 
-from supply_chain_gym import InvMgmtEnv
+from battery_env_gym import BatteryOperationEnv
 
 @env_register
-class SupplyChainSafe(CMDP):
-    _support_envs = ['SupplyChain-v0']
+class BatteryOperaionSafe(CMDP):
+    _support_envs = ['Battery-v0']
     need_auto_reset_wrapper = True  
     need_time_limit_wrapper = True  
     num_envs = 1
@@ -43,7 +43,7 @@ class SupplyChainSafe(CMDP):
 
         self._device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         # Instantiate the environment object
-        self._env = InvMgmtEnv(env_id=env_id, **kwargs.get('env_init_cfgs', {}))
+        self._env = BatteryOperationEnv(env_id=env_id, **kwargs.get('env_init_cfgs', {}))
         # Specify the action space for initialization by the algorithm layer
         self._action_space = self._env.action_space
         # Specify the observation space for initialization by the algorithm layer
@@ -108,33 +108,39 @@ def recurse(eg,current, path=[],):
 
 if __name__ == '__main__':
     
-    eg = ExperimentGrid(exp_name='Benchmark_SupplyChain')
+    eg = ExperimentGrid(exp_name='Benchmark_Battery')
+
+    # Algos to run : CPO, TRPOLag, DDPGLag
 
     # 1) Define your policy lists
     # base_policy            = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
     # naive_lagrange_policy  = ['PPOLag', 'TRPOLag', 'RCPO']
     # first_order_policy     = ['CUP', 'FOCOPS', 'P3O']
-    second_order_policy    = ['CPO', 'PCPO']
+    # second_order_policy    = ['CPO', 'PCPO']
+    # second_order_policy    = ['CPO']
+    # base_policy = ['PPO']
     # saute_policy           = ['PPOSaute', 'TRPOSaute']
     # simmer_policy          = ['PPOSimmerPID', 'TRPOSimmerPID']
     # primal_policy          = ['OnCRPO']
     # off_policy             = ['DDPG', 'SAC', 'TD3', 'DDPGLag', 'TD3Lag',
     #                           'SACLag', 'DDPGPID', 'TD3PID', 'SACPID']
+    policy = ['CPO', 'TRPOLag', 'P3O', 'OnCRPO', 'DDPGLag']
+
 
     # 2) Which env to run
-    eg.add('env_id', ['SupplyChain-v0'])
+    eg.add('env_id', ['Battery-v0'])
 
     # 3) Load & preprocess env-init config from JSON
     script_dir = os.path.dirname(os.path.realpath(__file__))
 
-    cfg_path = os.path.join(script_dir, "config.json")
+    cfg_path = os.path.join(script_dir, "config_small2.json")
     # init_cfg = load_config(cfg_path)
 
     # 4) Wrap under 'env_init_cfgs' for the grid
     # env_config = {'env_init_cfgs': init_cfg}
 
     # 5) Specify algorithms
-    eg.add('algo', second_order_policy)
+    eg.add('algo', policy)
 
     # 6) Logger and training settings
     eg.add('logger_cfgs:use_wandb',    [False])
@@ -149,13 +155,13 @@ if __name__ == '__main__':
 
     # 8) The rest of your grid setup
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
-    num_steps_per_epoch = 360
-    total_epochs        = 1000
+    num_steps_per_epoch = 240
+    total_epochs        = 3500
     total_steps         = num_steps_per_epoch * total_epochs
 
     eg.add('algo_cfgs:steps_per_epoch', [num_steps_per_epoch])
     eg.add('train_cfgs:total_steps',    [total_steps])
-    # eg.add('logger_cfgs:window_lens',   [int(num_steps_per_epoch / init_cfg['T'])])
+    eg.add('logger_cfgs:window_lens',   [int(num_steps_per_epoch /24)])
     eg.add('seed',                      [0])
     eg.add('train_cfgs:device',         ['cuda:0'])
 
@@ -168,22 +174,6 @@ if __name__ == '__main__':
 
     # 10) Run, analyze, evaluate
     eg.run(train, num_pool=1, gpu_id=gpu_id)
-    eg.analyze(parameter='algo', compare_num=1)
+    eg.analyze(parameter='algo', compare_num=5)
     results = eg.evaluate(num_episodes=10)
     print(results)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

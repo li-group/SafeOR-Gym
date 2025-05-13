@@ -8,9 +8,9 @@ def create_model(env, demand, bigm = 10000):
     T = env.T
 
     dem_param = {
-        (t, j, k): float(demand[(j, k)][t-1])
+        (t, (j, k)): float(demand[(j, k)][t-1])
         for (j, k) in env.retailer_routes
-        for t in range(1, T+1)
+        for t in range(1, T + 1)
     }
 
     model = pyo.ConcreteModel()
@@ -71,7 +71,7 @@ def create_model(env, demand, bigm = 10000):
                 for t in model.Time_periods 
                 for j in model.Main 
             )
-        ) / len(model.Time_periods),
+        ),
         sense=pyo.maximize
     )
 

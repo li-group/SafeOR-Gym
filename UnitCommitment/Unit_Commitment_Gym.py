@@ -1,15 +1,11 @@
 '''
 Unit Commitment
-Hao Chen
 '''
 import random
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
 
 import torch
 import numpy as np
-
-import scipy.stats as stats
-# from or_gym.envs.power_system.forecast import get_random_25hr_forecast
 
 import gymnasium as gym
 from gymnasium.spaces.utils import flatten_space
@@ -105,21 +101,18 @@ class UnitCommitmentMasterEnv(gym.Env):
                              'Penalty of Ramping Up Violation': 0,
                              'Number of Ramping Down Violation': 0,
                              'Penalty of Ramping Down Violation': 0,
-                             # 'Number of Irreparable Violation': 0,
-                             # 'Penalty of Irreparable Violation': 0,
-                             "debug: underflow in total": 0,
-                             'debug: production cost': 0,
-                             'debug: start-up cost': 0,
-                            'debug: shut-down cost': 0,
-                             'debug: load shedding cost': 0,
-                            'debug: reserve cost': 0,
+                             'Number of Flow Minimum Violation': 0,
+                             'Penalty of Flow Minimum Violation': 0,
+                             'Number of Flow Maximum Violation': 0,
+                             'Penalty of Flow Maximum Violation': 0,
                              }
 
-        self.penalty_factor_UT = 100
-        self.penalty_factor_DT = 100
-        self.penalty_factor_RampUp = 100
-        self.penalty_factor_RampDown = 100
-        # self.penalty_factor_irreparable = 1000000
+        self.penalty_factor_UT = 1.
+        self.penalty_factor_DT = 1.
+        self.penalty_factor_RampUp = 0.1
+        self.penalty_factor_RampDown = 0.1
+        self.penalty_factor_fmin = 0.1
+        self.penalty_factor_fmax = 0.1
 
         self.T = 24
         self._max_episode_steps = self.T
@@ -226,7 +219,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         # assume only 1st generator is on
         self.u_prev = self.u0_prev = np.array([1, 0, 0, 0, 0])
         self.u = self.u0 = np.array([1, 0, 0, 0, 0])
-        self.v, self.w = self._reckless_move(self.u, self.u_prev)
+        self.v, self.w = self._compute_vw(self.u, self.u_prev)
         self.v_seq, self.w_seq = self._u2vw_seq(self.u_seq)
 
         self.p_prev = self.p0_prev = np.array([300, 0, 0, 0, 0])
@@ -366,7 +359,7 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.u_seq = self.u0_seq
             self.u_prev = np.concatenate([self.u_seq[i][1] for i in self.generators])
             self.u = np.concatenate([self.u_seq[i][0] for i in self.generators])
-        self.v, self.w = self._reckless_move(self.u, self.u_prev)
+        self.v, self.w = self._compute_vw(self.u, self.u_prev)
         self.v_seq, self.w_seq = self._u2vw_seq(self.u_seq)
 
         # forecast the demand
@@ -382,7 +375,7 @@ class UnitCommitmentMasterEnv(gym.Env):
         return seq_vector
 
     @staticmethod
-    def _reckless_move(u_new: np.ndarray, u_curr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def _compute_vw(u_new: np.ndarray, u_curr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         get v_{t+1} and w_{t+1} from u_{t+1} and u_t
         """
@@ -434,6 +427,14 @@ class UnitCommitmentMasterEnv(gym.Env):
             p_curr - p_new - (self.RD * u_new + self.SD * w_new), 0)) * self.penalty_factor_RampDown
         return RampUp_violation, RampDown_violation, RampUp_cost, RampDown_cost
 
+    def _evaluate_capacity(self, pi_new):
+        flow = self.B * (pi_new[self.from_bus] - pi_new[self.to_bus])
+        fmin_violation = self.F_min > flow
+        fmax_violation = flow > self.F_max
+        fmin_cost = np.sum(np.maximum(self.F_min - flow, 0)) * self.penalty_factor_fmin
+        fmax_cost = np.sum(np.maximum(flow - self.F_max, 0)) * self.penalty_factor_fmax
+        return fmin_violation, fmax_violation, fmin_cost, fmax_cost
+
     def _repair_action(self, on_off: np.ndarray, power: np.ndarray, angle: np.ndarray):
         """
         Repair the action that violates
@@ -442,60 +443,28 @@ class UnitCommitmentMasterEnv(gym.Env):
         Minimum Up-Time implies the generators that must be on
         Minimum Down-Time implies the generators that must be off
         Ramping up implies a tighter bound on the power of the generators that are on
-        Ramping down implies
-        (1) the generators that must be on (if turning off, the decrease will exceed the max shut down rate)
-        (2) a tighter bound on the power of the generators that are good to be off
-
-        the must_on and must off obtained from Minimum Up-Time and Minimum Down-Time won't contradict with each other
-        but the must on and must off obtained from Ramping down and Minimum Down-Time may contradict with each other
-        if not contradicted, the action can be repaired by fixing all the must on&off and applying tighter bounds
-        if contradicted, the action cannot be repaired and leads to truncated or a very large cost
+        Ramping down implies a tighter bound on the power of the generators that are good to be off
         """
         u_new = on_off
         u_curr = self.u
-        v_new, w_new = self._reckless_move(u_new, u_curr)
+        v_new, w_new = self._compute_vw(u_new, u_curr)
         p_new = power
         p_curr = self.p
         pi_new = angle
 
-        # # check contradiction
-        # # we must keep it off, as turning on will result in a too early turn-on
-        # must_off = np.array([np.sum(self.w_seq[i][:-1]) for i in self.generators]) > 0
-        # # we must keep it on, as turning off will result in a too large decrease
-        # must_on = p_curr > self.SD
-        # contradiction = must_on & must_off
-
         # repair part of the action
-        repaired_pi_new = np.minimum(np.maximum(pi_new, self.Pi_min), self.Pi_max)
+        flow = self.B * (pi_new[self.from_bus] - pi_new[self.to_bus])
+        repaired_flow_new = np.minimum(np.maximum(flow, self.F_min), self.F_max)
         # the decision, on, implies turn-on and violates DT, so must keep it off
         # the decision, off, implies turn-off and violates UT, so must keep it on
         UT_violation, DT_violation, UT_cost, DT_cost = self._evaluate_UTDT(u_new, v_new, w_new)
         repaired_u_new = np.where(DT_violation, 0, np.where(UT_violation, 1, u_new))
-        repaired_v_new, repaired_w_new = self._reckless_move(repaired_u_new, u_curr)
-
-        # if np.any(contradiction):
-        #     # self.truncated = True # DON'T TRUNCATE EVEN THOUGH WE CANNOT REPAIR THE ACTION
-        #     repaired_p_new = u_new * np.minimum(np.maximum(p_new, self.P_min), self.P_max)
-        #     # ADD UP A VERY LARGE COST INSTEAD
-        #     irreparable_violation = contradiction
-        #     irreparable_cost = np.sum(contradiction) * self.penalty_factor_irreparable
-        #     self.cost += irreparable_cost
-        #
-        #     self.env_spec_log['Number of Irreparable Violation'] += np.sum(irreparable_violation)
-        #     self.env_spec_log['Penalty of Irreparable Violation'] += irreparable_cost
-        #
-        # else:
-        #     # repair the rest of the action
-        #     ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
-        #     lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
-        #     repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
-        # return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_pi_new
-        # return u_new, v_new, w_new, p_new, pi_new
+        repaired_v_new, repaired_w_new = self._compute_vw(repaired_u_new, u_curr)
 
         ub = p_curr + self.RU * u_curr + self.SU * repaired_v_new
         lb = p_curr - self.RD * repaired_u_new - self.SD * repaired_w_new
         repaired_p_new = repaired_u_new * np.minimum(np.maximum(p_new, lb), ub)
-        return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_pi_new
+        return repaired_u_new, repaired_v_new, repaired_w_new, repaired_p_new, repaired_flow_new
 
     def _compute_reserve(self, u_new: np.ndarray,
                          v_new: np.ndarray, w_new: np.ndarray, p_new: np.ndarray) -> np.ndarray:
@@ -512,11 +481,6 @@ class UnitCommitmentMasterEnv(gym.Env):
                            self.RU * u_curr + self.SU * v_new + p_curr - p_new),
                 0)
         return r
-
-    def _compute_power_flow(self, pi_new: np.ndarray) -> np.ndarray:
-        flow = self.B * (pi_new[self.from_bus] - pi_new[self.to_bus])
-        repaired_flow = np.minimum(np.maximum(flow, self.F_min), self.F_max)
-        return repaired_flow
 
     def _compute_power_slack(self, p_new: np.ndarray, flow: np.ndarray, demand: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         flow_in = np.array([np.sum(flow[self.to_bus_lines[b]]) for b in self.buses])
@@ -546,16 +510,13 @@ class UnitCommitmentMasterEnv(gym.Env):
         demand = self.forecast_model.forecast()
         return demand
 
-    def _compute_reward(self, u_new, v_new, w_new, p_new, pi_new, demand) -> np.float32:
-        reward = 0
-
+    def _compute_reward(self, u_new, v_new, w_new, p_new, flow_new, demand) -> np.float32:
         # compute the reserve
         reserve = self._compute_reserve(u_new, v_new, w_new, p_new)
         # compute the flow
-        flow = self._compute_power_flow(pi_new)
+        flow = flow_new
         # compute the power slack
         overflow, underflow = self._compute_power_slack(p_new, flow, demand)
-        self.env_spec_log['debug: underflow in total'] += np.sum(underflow)
 
         # compute the reward
         production_reward = self._compute_production_reward(p_new)
@@ -565,18 +526,13 @@ class UnitCommitmentMasterEnv(gym.Env):
         reserve_shortfall_reward = self._compute_reservation_reward(reserve)
         reward = (production_reward + startup_reward + shutdown_reward +
                         load_shedding_reward + reserve_shortfall_reward)
-        self.env_spec_log['debug: production cost'] += production_reward
-        self.env_spec_log['debug: start-up cost'] += startup_reward
-        self.env_spec_log['debug: shut-down cost'] += shutdown_reward
-        self.env_spec_log['debug: load shedding cost'] += load_shedding_reward
-        self.env_spec_log['debug: reserve cost'] += reserve_shortfall_reward
         return reward
 
     def _compute_cost(self, on_off: np.ndarray, power: np.ndarray, angle: np.ndarray,
                       demand: np.ndarray) -> np.int64:
         u_new = on_off
         u_curr = self.u
-        v_new, w_new = self._reckless_move(u_new, u_curr)
+        v_new, w_new = self._compute_vw(u_new, u_curr)
         p_new = u_new * np.minimum(np.maximum(power, self.P_min), self.P_max)
         p_curr = self.p
         pi_new = angle
@@ -586,14 +542,8 @@ class UnitCommitmentMasterEnv(gym.Env):
         RampUp_violation, RampDown_violation, RampUp_cost, RampDown_cost = self._evaluate_Ramp(u_new, u_curr,
                                                                                                p_new, p_curr,
                                                                                                v_new, w_new)
-        cost = UT_cost + DT_cost + RampUp_cost + RampDown_cost
-
-        # # compute the flow
-        # flow = self._compute_power_flow(pi_new)
-        # # compute the power slack
-        # overflow, underflow = self._compute_power_slack(p_new, flow, demand)
-        # load_shedding_cost = - self._compute_fulfillment_reward(overflow, underflow)
-        # cost += load_shedding_cost
+        fmin_violation, fmax_violation, fmin_cost, fmax_cost = self._evaluate_capacity(pi_new)
+        cost = UT_cost + DT_cost + RampUp_cost + RampDown_cost + fmin_cost + fmax_cost
 
         # log the violation and cost
         self.env_spec_log['Number of Minimum Up-time Violation'] += np.sum(UT_violation)
@@ -604,6 +554,10 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.env_spec_log['Penalty of Ramping Up Violation'] += RampUp_cost
         self.env_spec_log['Number of Ramping Down Violation'] += np.sum(RampDown_violation)
         self.env_spec_log['Penalty of Ramping Down Violation'] += RampDown_cost
+        self.env_spec_log['Number of Flow Minimum Violation'] += np.sum(fmin_violation)
+        self.env_spec_log['Penalty of Flow Minimum Violation'] += fmin_cost
+        self.env_spec_log['Number of Flow Maximum Violation'] += np.sum(fmax_violation)
+        self.env_spec_log['Penalty of Flow Maximum Violation'] += fmax_cost
 
         return cost
 
@@ -612,7 +566,6 @@ class UnitCommitmentMasterEnv(gym.Env):
             self.terminated = True
         else:
             self.terminated = False
-        return self.terminated
 
     def _scale_and_round_action(self, on_off, power, angle):
         if torch.is_tensor(on_off):
@@ -659,18 +612,17 @@ class UnitCommitmentMasterEnv(gym.Env):
         # compute the cost of raw action
         self.cost += self._compute_cost(on_off, power, angle, demand)
 
-        # repair the action (may fail to repair -> use the partially repaired action and add a large cost)
-        # Note the _repair_action function will also update the cost inside the function if irreparable
+        # repair the action
         (repaired_u_new, repaired_v_new, repaired_w_new,
-         repaired_p_new, repaired_pi_new) = self._repair_action(on_off, power, angle)
+         repaired_p_new, repaired_flow_new) = self._repair_action(on_off, power, angle)
 
         # compute the reward
         self.reward = self._compute_reward(repaired_u_new, repaired_v_new, repaired_w_new,
-                                           repaired_p_new, repaired_pi_new, demand)
+                                           repaired_p_new, repaired_flow_new, demand)
 
         # update state
         self.t += 1
-        self.pi = repaired_pi_new
+        self.pi = angle
         self.p_prev = self.p
         self.p = repaired_p_new
         self.u_prev = self.u
@@ -680,6 +632,8 @@ class UnitCommitmentMasterEnv(gym.Env):
         if self.t < self.T:
             self.D_forecast = self._forecast_demand()
         state = self._get_state()
+
+        self._get_terminated()
 
         return (
             state,

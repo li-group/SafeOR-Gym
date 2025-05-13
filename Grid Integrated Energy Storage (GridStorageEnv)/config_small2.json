@@ -1,0 +1,102 @@
+{
+  "time_periods": 24,
+  "Buses": [1, 2],
+  "Generators": [1, 2],
+  "TransmissionLines": [
+    [1, 2]
+  ],
+  "DeEnergizedLines": [],
+  "BusGeneratorLink": {
+    "1": 1,
+    "2": 2
+  },
+  "PowerDemandAtBus": {
+    "1": {
+      "1": 10,  "2": 11,  "3": 9,   "4": 10,
+      "5": 11,  "6": 9,   "7": 10,  "8": 11,
+      "9": 9,  "10": 10, "11": 11, "12": 9,
+      "13": 10, "14": 11, "15": 9,  "16": 10,
+      "17": 11, "18": 9,  "19": 10, "20": 11,
+      "21": 9,  "22": 10, "23": 11, "24": 9
+    },
+    "2": {
+      "1": 5,  "2": 6,  "3": 4,  "4": 5,
+      "5": 6,  "6": 4,  "7": 5,  "8": 6,
+      "9": 4, "10": 5, "11": 6, "12": 4,
+      "13": 5, "14": 6, "15": 4, "16": 5,
+      "17": 6, "18": 4, "19": 5, "20": 6,
+      "21": 4, "22": 5, "23": 6, "24": 4
+    }
+  },
+  "LineSusceptance": {
+    "(1,2)": 10.0
+  },
+  "LinePowerFlowLimit": {
+    "(1,2)": 50.0
+  },
+  "LineUpperVoltageAngle": {
+    "(1,2)": 0.30
+  },
+  "LineLowerVoltageAngle": {
+    "(1,2)": -0.30
+  },
+  "GeneratorUpperLimit": {
+    "1": 50.0,
+    "2": 50.0
+  },
+  "GeneratorLowerLimit": {
+    "1": 0.0,
+    "2": 0.0
+  },
+  "BatteryUpLimit": {
+    "1": 1.0,
+    "2": 1.0
+  },
+  "BatteryLowLimit": {
+    "1": 0.0,
+    "2": 0.0
+  },
+  "BatteryInitialCharge": {
+    "1": 0.5,
+    "2": 0.5
+  },
+  "LowerBatteryChargeRate": {
+    "1": 0.0,
+    "2": 0.0
+  },
+  "UpperBatteryChargeRate": {
+    "1": 1.0,
+    "2": 1.0
+  },
+  "LowerBatteryDischargeRate": {
+    "1": 0.0,
+    "2": 0.0
+  },
+  "UpperBatteryDischargeRate": {
+    "1": 1.0,
+    "2": 1.0
+  },
+  "ChargeEfficiency": 1.0,
+  "CarryOverRate": 1.0,
+  "PolynomialDegree": 1,
+  "GeneratorCost": {
+    "(1,0)": 10.0,
+    "(2,0)": 10.0
+  },
+  "Kls": 10.0,
+  "Kslack": 10.0,
+  "ThetaMax": 0.30,
+  "DemandForecastHorizon": 6,
+  "smax": 100.0,
+  "dmax_global": 100.0,
+  "PhiBalance": 100.0,
+  "PhiThetaAction": 20.0,
+  "PhiPower": 10.0,
+  "PhiCharge": 10.0,
+  "PhiDischarge": 10.0,
+  "PhiSlack": 100.0,
+  "PhiShed": 100.0,
+  "PhiSOC": 20.0,
+  "PhiTheta": 20.0,
+  "PhiFlowRatio": 100.0
+}
