@@ -30,6 +30,8 @@ config_path = os.path.join(current_dir, 'asu_config.json')
 with open(config_path, 'r') as config_file:
     ASUEnv_DATA_FILES = json.load(config_file)
 
+### MAKE ONLY 1 JSON FILE ###
+
 class ASUEnv(gym.Env):
 
     """
@@ -54,15 +56,23 @@ class ASUEnv(gym.Env):
             - Demand shortfall at the end of the day.
 
     """
+    # _CONFIG_SCHEMA = {
+    #     "demand": list,
+    #     "electricity_prices": list,
+    #     "compressors": list, 
+    # }  # FIX THIS HERE for ASUEnv
+
 
     # def __init__(self, asu_name, lookahead, days_to_simulate):
     def __init__(self, env_id: str, **kwargs: Any) -> None:
 
-        super().__init__()
         self.name = env_id
         lookahead = 4
+        self.lookahead_days = lookahead
         days_to_simulate = 7
         T = days_to_simulate
+        self.T = T
+        self._max_episode_steps = self.T
 
         self.env_id = env_id
         self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
@@ -70,14 +80,7 @@ class ASUEnv(gym.Env):
         # Simulation time counters
         self.current_hour = 0  # hour in current day (0-23)
         self.current_day = 0   # start of the first day (0-indexed) 
-        
-        self.lookahead_days = lookahead
-        self.T = T
-        self._max_episode_steps = self.T
 
-        self.env_id = env_id
-        self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
-        
         # Initialize parameters, state, observation and action spaces
         self._initialize_params()
         self._initialize_simulation_data()
@@ -162,19 +165,6 @@ class ASUEnv(gym.Env):
         self.unit_prod_cost = self.loaded_data['dynamic_cost'][0]
         self.IV_i = self.loaded_data['IV_i']           # Initial inventory levels
         self.total_hours = self.loaded_data['total_hours'][0]
-
-    # def _initialize_observation_space(self):
-
-    #     self.reset()
-    #     """Define the observation space."""
-    #     # Build the high bound for inventory from IV_u
-    #     self.iv_high = np.array([self.IV_u[prod] for prod in self.products], dtype=np.float32)
-        
-    #     self.observation_space = spaces.Dict({
-    #         'electricity_prices': spaces.Box(low=0, high=np.inf, shape=(24 * (1+self.lookahead_days),), dtype=np.float32),
-    #         'demand': spaces.Box(low=0, high=np.inf, shape=(len(self.products), 24 * (1+self.lookahead_days)), dtype=np.float32),
-    #         'IV': spaces.Box(low=0, high=self.iv_high, shape=(len(self.products),), dtype=np.float32)
-    #     })
     
     def _initialize_observation_space(self):
         self.reset()
@@ -214,9 +204,6 @@ class ASUEnv(gym.Env):
         row_liqprod, colliq_prod = self.extreme_points_liqp.shape
         self.row_liqprod = row_liqprod
 
-        # self.action_space = spaces.Dict({
-        #     'lambda': spaces.Box(low=0, high=1, shape=(self.row_liqprod,), dtype=np.float32),
-        # })
         self.action_space = spaces.Box(
         low=0.0,
         high=1.0,

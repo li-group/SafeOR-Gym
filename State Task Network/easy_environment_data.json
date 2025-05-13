@@ -1,0 +1,281 @@
+{
+    "reactants": {
+        "raw_1": {
+            "X0": 200.0,
+            "Xmin": 0.0,
+            "Xmax": 200.0,
+            "cost": -0.055483457048993046,
+            "inventory_cost": -0.005,
+            "used": 0.0
+        },
+        "raw_2": {
+            "X0": 200.0,
+            "Xmin": 0.0,
+            "Xmax": 200.0,
+            "cost": -0.05580585364363814,
+            "inventory_cost": -0.005,
+            "used": 0.0
+        },
+        "raw_3": {
+            "X0": 200.0,
+            "Xmin": 0.0,
+            "Xmax": 200.0,
+            "cost": -0.01,
+            "inventory_cost": -0.005,
+            "used": 0.0
+        }
+    },
+    "intermediates": {
+        "intermediate_1": {
+            "X0": 100.0,
+            "Xmin": 0.0,
+            "Xmax": 200.0,
+            "inventory_cost": -0.005,
+            "used": 0.0,
+            "produced": 1.0
+        },
+        "intermediate_2": {
+            "X0": 100.0,
+            "Xmin": 0.0,
+            "Xmax": 200.0,
+            "inventory_cost": -0.005,
+            "used": 0.0,
+            "produced": 1.0
+        }
+    },
+    "products": {
+        "product_1": {
+            "X0": 50.0,
+            "Xmin": 0.0,
+            "Xmax": 200.0,
+            "cost": 2.3494194263082004,
+            "inventory_cost": -0.005,
+            "produced": 0.0
+        },
+        "product_2": {
+            "X0": 50.0,
+            "Xmin": 0.0,
+            "Xmax": 200.0,
+            "cost": 2.5955119660557706,
+            "inventory_cost": -0.005,
+            "produced": 0.0
+        }
+    },
+    "tasks": {
+        "task_1": {
+            "p": {
+                "product_1": 1,
+                "intermediate_1": 1,
+                "intermediate_2": 1
+            },
+            "Vmin": {
+                "equipment_3" : 12.13742157418055
+            },
+            "Vmax": {
+                "equipment_3" : 15.86475359912445
+            },
+            "n_raw": 3,
+            "raws": {
+                "0": "raw_1",
+                "1": "raw_3",
+                "2": "raw_2"
+            },
+            "raw_dist": {
+                "raw_1": 0.36248147170721406,
+                "raw_3": 0.36248147170721406,
+                "raw_2": 0.1264846142275139
+            },
+            "n_prod": 1,
+            "prods": {
+                "0": "product_1"
+            },
+            "prod_dist": {
+                "product_1": 0.5
+            },
+            "n_int_react": 0,
+            "int_react": {},
+            "int_react_dist": {},
+            "n_int_prod": 2,
+            "int_prod": {
+                "0": "intermediate_1",
+                "1": "intermediate_2"
+            },
+            "int_prod_dist": {
+                "intermediate_1": 0.16666666666666666,
+                "intermediate_2": 0.3333333333333333
+            },
+            "n_equipment": 1,
+            "equipments": {
+                "0": "equipment_3"
+            },
+            "n_utility": 0,
+            "utilities": {}
+        },
+        "task_2": {
+            "p": {
+                "product_1": 2,
+                "product_2": 2
+            },
+            "Vmin": {
+                "equipment_1" : 10.019243083546204
+            },
+            "Vmax": {
+                "equipment_1" : 17.09788365029426
+            },
+            "n_raw": 0,
+            "raws": {},
+            "raw_dist": {},
+            "n_prod": 2,
+            "prods": {
+                "0": "product_2",
+                "1": "product_1"
+            },
+            "prod_dist": {
+                "product_2": 0.6666666666666666,
+                "product_1": 0.3333333333333333
+            },
+            "n_int_react": 1,
+            "int_react": {
+                "0": "intermediate_1"
+            },
+            "int_react_dist": {
+                "intermediate_1": 1.0
+            },
+            "n_int_prod": 0,
+            "int_prod": {},
+            "int_prod_dist": {},
+            "n_equipment": 1,
+            "equipments": {
+                "0": "equipment_1"
+            },
+            "n_utility": 2,
+            "utilities": {
+                "utility_1": 0.8,
+                "utility_2": 2.97954174046211
+            }
+        },
+        "task_3": {
+            "p": {
+                "product_1": 2,
+                "intermediate_1": 2,
+                "intermediate_2": 2
+            },
+            "Vmin": {
+                "equipment_2" : 14.56444183627529
+            },
+            "Vmax": {
+                "equipment_2" : 16.77958848831356
+            },
+            "n_raw": 0,
+            "raws": {},
+            "raw_dist": {},
+            "n_prod": 1,
+            "prods": {
+                "0": "product_1"
+            },
+            "prod_dist": {
+                "product_1": 1.0
+            },
+            "n_int_react": 3,
+            "int_react": {
+                "0": "intermediate_1",
+                "1": "intermediate_2",
+                "2": "intermediate_2"
+            },
+            "int_react_dist": {
+                "intermediate_1": 0.5921560467484666,
+                "intermediate_2": 0.4078439532515335
+            },
+            "n_int_prod": 0,
+            "int_prod": {},
+            "int_prod_dist": {},
+            "n_equipment": 1,
+            "equipments": {
+                "0": "equipment_2"
+            },
+            "n_utility": 0,
+            "utilities": {}
+        }
+    },
+    "equipments": {
+        "equipment_1": {
+            "X0": 10.0,
+            "Xmin": 0.0,
+            "Xmax": 10.0
+        },
+        "equipment_2": {
+            "X0": 10.0,
+            "Xmin": 0.0,
+            "Xmax": 10.0
+        },
+        "equipment_3": {
+            "X0": 10.0,
+            "Xmin": 0.0,
+            "Xmax": 10.0
+        }
+    },
+    "demand": {
+        "product_1": {
+            "1": 0.0,
+            "2": 0.0,
+            "3": 0.0,
+            "4": 0.0,
+            "5": 0.0,
+            "6": 0.0,
+            "7": 0.0,
+            "8": -14.40325805942026,
+            "9": 0.0,
+            "10": 0.0
+        },
+        "product_2": {
+            "1": 0.0,
+            "2": 0.0,
+            "3": 0.0,
+            "4": 0.0,
+            "5": 0.0,
+            "6": 0.0,
+            "7": 0.0,
+            "8": 0.0,
+            "9": 0.0,
+            "10": -10.0
+        }
+    },
+    "elec_cost": {
+        "1": 0.07866508856715429,
+        "2": 0.07759153361665537,
+        "3": 0.07989874820463974,
+        "4": 0.08422861291598452,
+        "5": 0.08639368904243327,
+        "6": 0.07239904994843632,
+        "7": 0.07706154322870133,
+        "8": 0.07445914217784623,
+        "9": 0.07192454275327792,
+        "10": 0.07621570828101762
+    },
+    "utility_costs": {
+        "utility_1": {
+            "1": 0.06261852369941727,
+            "2": 0.06258278280677594,
+            "3": 0.0653843668460814,
+            "4": 0.06725045635467702,
+            "5": 0.06826629161853041,
+            "6": 0.059910283457492226,
+            "7": 0.06014817657205369,
+            "8": 0.06022491425244123,
+            "9": 0.05863476912542383,
+            "10": 0.06243629055576004
+        },
+        "utility_2": {
+            "1": 0.23354906725904154,
+            "2": 0.2211102852026562,
+            "3": 0.23501923814836126,
+            "4": 0.2572463875473473,
+            "5": 0.269931010879347,
+            "6": 0.21955213382814293,
+            "7": 0.22971368648747698,
+            "8": 0.21690400858339862,
+            "9": 0.20411192889448143,
+            "10": 0.22260019608933698
+        }
+    }
+}
