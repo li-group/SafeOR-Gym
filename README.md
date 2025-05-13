@@ -16,15 +16,12 @@ The key contributions of this project:
 If you find SafeOR-Gym useful, please cite it in your publication
 
 > ```bibtex
-> @article{JMLR:v25:23-0681,
->   author  = {Jiaming Ji and Jiayi Zhou and Borong Zhang and Juntao Dai and Xuehai Pan and Ruiyang Sun},
->   title   = {OmniSafe: An Infrastructure for Accelerating Safe Reinforcement Learning Research},
->   journal = {Journal of Machine Learning Research},
->   year    = {2024},
->   volume  = {25},
->   number  = {285},
->   pages   = {1--6},
->   url     = {http://jmlr.org/papers/v25/23-0681.html}
+> @article{,
+>   author  = {THE LI GROUP},
+>   title   = {SafeOR-Gym: A Benchmark Suite for Safe Reinforcement Learning Algorithms on Practical Operations Research Problems},
+>   journal = {Coming soon},
+>   year    = {2025},
+>   url     = {}
 > }
 > ```
 
