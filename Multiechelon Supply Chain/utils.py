@@ -1,15 +1,37 @@
 import numpy as np
 
+# def assign_env_config(self, kwargs):
+#     print("Assigning configuration...")
+#     for key, value in kwargs.items():
+#         print(f"Trying to set {key} to {value}")
+#         if hasattr(self, key):
+#             print(f"Setting {key} to {value}")
+#             setattr(self, key, value)
+#         else:
+#             print(f"{self} has no attribute, {key}")
+#             raise AttributeError(f"{self} has no attribute, {key}")
+
 def assign_env_config(self, kwargs):
     print("Assigning configuration...")
+    print(len(kwargs), "kwargs")
     for key, value in kwargs.items():
-        print(f"Trying to set {key} to {value}")
-        if hasattr(self, key):
-            print(f"Setting {key} to {value}")
-            setattr(self, key, value)
-        else:
-            print(f"{self} has no attribute, {key}")
-            raise AttributeError(f"{self} has no attribute, {key}")
+        print(f"Trying to set {key} to {value!r}")
+
+        # 1) ensure it's in the schema
+        if key not in self._CONFIG_SCHEMA:
+            raise AttributeError(f"{self!r} has no config attribute '{key}'")
+
+        # 2) type‐check
+        expected_type = self._CONFIG_SCHEMA[key]
+        if not isinstance(value, expected_type):
+            raise TypeError(
+                f"Config '{key}' expects type {expected_type.__name__}, "
+                f"got {type(value).__name__}"
+            )
+
+        # 3) finally setattr
+        print(f"Setting {key} to {value!r}")
+        setattr(self, key, value)
 
 def flatten_dict(dictionary, parent_key='', separator=';'):
     """
