@@ -27,7 +27,7 @@ If you find SafeOR-Gym useful, please cite it in your publication
 
 ---
 
-## 📖 Table of Contents
+## Table of Contents
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -37,3 +37,26 @@ If you find SafeOR-Gym useful, please cite it in your publication
 - [Citing This Work](#citing-this-work)
 
 ---
+
+## Installation
+
+### Prerequisites
+
+- Python 3.8+
+- PyTorch ≥ 1.10
+- (Optional) Gurobi / CPLEX for optimization
+
+### Install
+
+```bash
+git clone https://github.com/li-group/SafeOR-Gym.git
+cd SafeOR-Gym
+conda env create safe_rl_env
+conda activate safe_rl_env
+pip install pyomo
+cd omnisafe
+pip install setuptools==65.5.1
+pip install .
+cd ..
+```
+
