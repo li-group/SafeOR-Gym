@@ -13,27 +13,14 @@ The key contributions of this project:
 
 - Empirical evaluation tools to assess safety violations, constraint satisfaction, and policy performance under structured conditions.
 
-If you find SafeOR-Gym useful, please cite it in your publication
-
-> ```bibtex
-> @article{,
->   author  = {THE LI GROUP},
->   title   = {SafeOR-Gym: A Benchmark Suite for Safe Reinforcement Learning Algorithms on Practical Operations Research Problems},
->   journal = {Coming soon},
->   year    = {2025},
->   url     = {}
-> }
-> ```
 
 ---
 
 ## Table of Contents
 
 - [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Folder Structure](#folder-structure)
-- [Implemented Algorithms](#implemented-algorithms)
 - [Environments](#environments)
+- [Benchmarked Algorithms](#benchmarked-algorithms)
 - [Citing This Work](#citing-this-work)
 
 ---
@@ -59,4 +46,40 @@ pip install setuptools==65.5.1
 pip install .
 cd ..
 ```
+
+## Environments
+
+- **Air Separation Unit**: Optimize cryogenic gas separation with flow, temperature, and purity constraints.
+- **Generation and Transmission Expansion Planning (GTEPEnv)**: Plan capacity expansion in power systems under long-term investment and operational constraints.
+- **Grid Integrated Energy Storage (GridStorageEnv)**: Manage storage dispatch in a grid setting with price arbitrage and safety limits.
+- **Integrated Scheduling and Maintenance**: Jointly optimize production schedules and maintenance windows under equipment availability constraints.
+- **Multi-Echelon Supply Chain (InvMgmtEnv)**: Simulate inventory dynamics across multiple tiers of a supply chain network.
+- **Multiperiod Blending Problem (BlendingEnv)**: Solve a multi-time-step blending optimization under ratio, availability, and demand constraints.
+- **Resource Task Network**: Schedule resource-consuming tasks across time with bounded inventories and task delays.
+- **State Task Network**: Model discrete-time transitions of material states via tasks executed on shared units.
+- **Unit Commitment**: Optimize on/off decisions for generators over time while meeting demand and respecting ramping and reserve constraints.
+
+
+## Benchmarked Algorithms
+
+- **CPO**
+- **TRPOLag**
+- **P3O**
+- **OnCRPO**
+- **DDPGLag**
+
+
+
+### Citing this work
+If you find SafeOR-Gym useful, please cite it in your publication
+
+> ```bibtex
+> @article{,
+>   author  = {THE LI GROUP},
+>   title   = {SafeOR-Gym: A Benchmark Suite for Safe Reinforcement Learning Algorithms on Practical Operations Research Problems},
+>   journal = {Coming soon},
+>   year    = {2025},
+>   url     = {}
+> }
+> ```
 
