@@ -60,13 +60,101 @@ cd ..
 - **Unit Commitment**: Optimize on/off decisions for generators over time while meeting demand and respecting ramping and reserve constraints.
 
 
-## Benchmarked Algorithms
+## Benchmarking Environments
 
-- **CPO**
-- **TRPOLag**
-- **P3O**
-- **OnCRPO**
-- **DDPGLag**
+In order to run and benchmark your own code for each of the environments, the following files must be run respectively.
+
+| Environment                                | Main Script File                  |
+|--------------------------------------------|-----------------------------------|
+| Integrated Scheduling and Maintenance      | `ISM_safe_host.py`                |
+| Air Separation Unit (ASUenv)               | `Asu_safe_host.py`                |
+| Unit Commitment                            | `Unit_Commitment_Safe.py`         |
+| Generation & Transmission Expansion (GTEP) | `gen_transmission_exp_safe.py`    |
+| MultiPeriod Blending                       | `Blending_safe.py`                |
+| Grid Integrated Energy Storage             | `battery_env_safe.py`             |
+| Multi-Echelon Supply Chain                 | `supply_chain_safe.py`            |
+| Resource Task Network                      | `main.py`                         |
+| State Task Network                         | `main.py`                         |
+
+### Benchmarking Setup (ExperimentGrid)
+
+This repository uses `ExperimentGrid` to manage and evaluate SafeRL training experiments. Below is an overview of its key functionality and a sample code block for running benchmarks.
+
+#### Key Features
+
+- **Algorithms**: Choose from multiple categories including first-order, second-order, primal, and offline SafeRL methods.
+- **Environments**: Select environment(s) and config paths using `env_id` and `env_cfgs:env_init_config`.
+- **Epoch Control**: Define `STEPS_PER_EPOCH` and `TOTAL_EPOCHS` to set training time.
+- **Logging**: Enable logging with TensorBoard or Weights & Biases (WandB).
+- **Parallelism**: Set `vector_env_nums` and `torch_threads` for environment and CPU parallelism.
+- **Device**: Automatically uses GPU if available, otherwise falls back to CPU.
+- **Evaluation**: Includes automated training, comparison analysis, and evaluation post-training.
+
+---
+
+####  Benchmarking Code
+
+```python
+eg = ExperimentGrid(exp_name='Benchmark_Safety_rtn_v0')
+
+# Define algorithm categories
+base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
+naive_lagrange_policy = ['TRPOLag']
+first_order_policy = ['P3O']
+second_order_policy = ['CPO']
+primal_policy = ['OnCRPO']
+offline_policy = ['DDPGLag']
+
+# Target environment
+mujoco_envs = ['rtn-v0']
+eg.add('env_id', mujoco_envs)
+
+# GPU configuration
+available_gpus = list(range(torch.cuda.device_count()))
+gpu_id = [0]
+if gpu_id and not set(gpu_id).issubset(available_gpus):
+    warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
+    gpu_id = None
+
+# Training configuration
+T = 10 if args.env_config == "easy_environment_data.json" else 30
+STEPS_PER_EPOCH = T * 128
+TOTAL_EPOCHS = 25
+TOTAL_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS
+
+# Set experiment parameters
+eg.add('seed', [args.seed])
+eg.add('algo', second_order_policy + naive_lagrange_policy + first_order_policy + primal_policy + offline_policy)
+
+# Logging configuration
+eg.add('logger_cfgs:use_wandb', [False])
+eg.add('logger_cfgs:use_tensorboard', [True])
+eg.add('logger_cfgs:window_lens', [int(STEPS_PER_EPOCH / T)])
+
+# Parallelism and device
+eg.add('train_cfgs:vector_env_nums', [1])
+eg.add('train_cfgs:torch_threads', [1])
+device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+eg.add('train_cfgs:device', [device])
+eg.add('train_cfgs:total_steps', [TOTAL_STEPS])
+
+# Model configuration
+eg.add('model_cfgs:actor:output_activation', ['tanh'])
+
+# Algorithm configuration
+eg.add('algo_cfgs:steps_per_epoch', [STEPS_PER_EPOCH])
+
+# Environment config file and parameters
+eg.add('env_cfgs:env_init_config:config_file', [args.env_config])
+eg.add('env_cfgs:env_init_config:debug', [args.debug])
+eg.add('env_cfgs:env_init_config:sanitization_cost_weight', [1.0])
+eg.add('env_cfgs:env_init_config:cost_coefficient', [1.0])
+
+# Run training, analysis, and evaluation
+eg.run(train, num_pool=1, gpu_id=gpu_id)
+eg.analyze(parameter='algo', values=None, compare_num=5)
+a = eg.evaluate(num_episodes=10)
+```
 
 
 
