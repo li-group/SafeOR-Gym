@@ -11,9 +11,6 @@ The key contributions of this project:
 
 - Ready-to-use integration with OmniSafe, enabling immediate use of a large number of SafeRL algorithms.
 
-- Empirical evaluation tools to assess safety violations, constraint satisfaction, and policy performance under structured conditions.
-
-
 ---
 
 ## Table of Contents
@@ -49,6 +46,7 @@ pip install setuptools==65.5.1
 pip install .
 cd ..
 ```
+Note: This repository uses a modified version of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
 
 ## Environments
 
