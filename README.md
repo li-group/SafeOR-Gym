@@ -52,7 +52,7 @@ cd ..
 
 ## Environments
 
-- **Air Separation Unit**: Optimize cryogenic gas separation with flow, temperature, and purity constraints.
+- **Production Scheduling in Air Separation Unit (ASUEnv)**: Optimize cryogenic gas separation with flow, temperature, and purity constraints.
 - **Generation and Transmission Expansion Planning (GTEPEnv)**: Plan capacity expansion in power systems under long-term investment and operational constraints.
 - **Grid Integrated Energy Storage (GridStorageEnv)**: Manage storage dispatch in a grid setting with price arbitrage and safety limits.
 - **Integrated Scheduling and Maintenance**: Jointly optimize production schedules and maintenance windows under equipment availability constraints.
@@ -65,19 +65,19 @@ cd ..
 
 ## Benchmarking Environments
 
-In order to run and benchmark your own code for each of the environments, the following files must be run respectively.
+Each environment has its own folder containing the relevant code. To run and benchmark an environment, execute the corresponding script located within its folder.
 
-| Environment                                | Main Script File                  |
-|--------------------------------------------|-----------------------------------|
-| Air Separation Unit                        | `Asu_safe_host.py`                |
-| Generation & Transmission Expansion        | `gen_transmission_exp_safe.py`    |
-| Integrated Scheduling and Maintenance      | `ISM_safe_host.py`                |
-| Unit Commitment                            | `Unit_Commitment_Safe.py`         |
-| MultiPeriod Blending                       | `Blending_safe.py`                |
-| Grid Integrated Energy Storage             | `battery_env_safe.py`             |
-| Multi-Echelon Supply Chain                 | `supply_chain_safe.py`            |
-| Resource Task Network                      | `main.py`                         |
-| State Task Network                         | `main.py`                         |
+| Environment                                  | Main Script File                  |
+|--------------------------------------------  |-----------------------------------|
+| Production Scheduling in Air Separation Unit | `Asu_safe_host.py`                |
+| Generation & Transmission Expansion          | `gen_transmission_exp_safe.py`    |
+| Grid Integrated Energy Storage               | `battery_env_safe.py`             |
+| Integrated Scheduling and Maintenance        | `ISM_safe_host.py`                |
+| Multi-Echelon Supply Chain                   | `supply_chain_safe.py`            |
+| MultiPeriod Blending                         | `Blending_safe.py`                |
+| Resource Task Network                        | `main.py`                         |
+| State Task Network                           | `main.py`                         |
+| Unit Commitment                              | `Unit_Commitment_Safe.py`         |
 
 ### Benchmarking Setup (ExperimentGrid)
 
