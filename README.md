@@ -69,10 +69,10 @@ In order to run and benchmark your own code for each of the environments, the fo
 
 | Environment                                | Main Script File                  |
 |--------------------------------------------|-----------------------------------|
+| Air Separation Unit                        | `Asu_safe_host.py`                |
+| Generation & Transmission Expansion        | `gen_transmission_exp_safe.py`    |
 | Integrated Scheduling and Maintenance      | `ISM_safe_host.py`                |
-| Air Separation Unit (ASUenv)               | `Asu_safe_host.py`                |
 | Unit Commitment                            | `Unit_Commitment_Safe.py`         |
-| Generation & Transmission Expansion (GTEP) | `gen_transmission_exp_safe.py`    |
 | MultiPeriod Blending                       | `Blending_safe.py`                |
 | Grid Integrated Energy Storage             | `battery_env_safe.py`             |
 | Multi-Echelon Supply Chain                 | `supply_chain_safe.py`            |
