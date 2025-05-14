@@ -5,7 +5,7 @@
     "num_retailers": 1,
     "num_distributors": 2,
     "num_producers": 3,
-    "num_raw_distributors": 4,
+    "num_raw_distributors": 2,
     "initial_inv": {
       "1": 100,
       "2": 120,
