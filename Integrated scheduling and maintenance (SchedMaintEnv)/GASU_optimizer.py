@@ -28,6 +28,7 @@ class optimize_GASU:
         To solve model, we would need to:
             1. One time update
                 :update_external_purchase_price(external_purchase_price)
+                :update_external_purchase_capacity(external_purchase_capacity)
             2. Based on state
                 :update_information_state(demand_array, price_array)
                 :update_mode_and_switch_history(compressor_observation)
