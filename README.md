@@ -117,13 +117,13 @@ if gpu_id and not set(gpu_id).issubset(available_gpus):
     gpu_id = None
 
 # Training configuration
-T = 10 if args.env_config == "easy_environment_data.json" else 30
+T = 30
 STEPS_PER_EPOCH = T * 128
-TOTAL_EPOCHS = 25
+TOTAL_EPOCHS = 100
 TOTAL_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS
 
 # Set experiment parameters
-eg.add('seed', [args.seed])
+eg.add('seed', [10])
 eg.add('algo', second_order_policy + naive_lagrange_policy + first_order_policy + primal_policy + offline_policy)
 
 # Logging configuration
@@ -145,15 +145,15 @@ eg.add('model_cfgs:actor:output_activation', ['tanh'])
 eg.add('algo_cfgs:steps_per_epoch', [STEPS_PER_EPOCH])
 
 # Environment config file and parameters
-eg.add('env_cfgs:env_init_config:config_file', [args.env_config])
-eg.add('env_cfgs:env_init_config:debug', [args.debug])
+eg.add('env_cfgs:env_init_config:config_file', [ENVIRONMENT_CONFIG_FILE_PATH])
+eg.add('env_cfgs:env_init_config:debug', [False])
 eg.add('env_cfgs:env_init_config:sanitization_cost_weight', [1.0])
 eg.add('env_cfgs:env_init_config:cost_coefficient', [1.0])
 
 # Run training, analysis, and evaluation
-eg.run(train, num_pool=1, gpu_id=gpu_id)
-eg.analyze(parameter='algo', values=None, compare_num=5)
-a = eg.evaluate(num_episodes=10)
+eg.run(train, num_pool = 1, gpu_id=gpu_id)
+eg.analyze(parameter='algo', values = None, compare_num = 5)
+a = eg.evaluate(num_episodes = 10)
 ```
 
 
