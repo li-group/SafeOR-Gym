@@ -2,7 +2,7 @@
 
 SafeOR-Gym is a benchmark suite of Gym-compatible environments for safe reinforcement learning (SafeRL) in industrially relevant operations research (OR) problems. It is designed to evaluate SafeRL algorithms on realistic, structured, and safety-critical decision-making problems commonly encountered in industrial planning and real-time control.
 
-This suite includes nine environments that model some well-known and challenging problems such as unit commitment, plant scheduling, resource allocation, supply chain logistics, and energy system operations. Each environment integrates combinatorial structure, strict constraints, and long planning horizons—making them ideal for testing the safety, robustness, and feasibility performance of RL agents. SafeOR-Gym is natively compatible with the OmniSafe framework, providing out-of-the-box support for constraint-handling algorithms, parallel training, and standardized benchmarking.
+This suite includes nine environments that model some well-known and challenging problems such as unit commitment, plant scheduling, resource allocation, supply chain logistics, and energy system operations. Each environment integrates strict constraints and planning horizons—making them ideal for testing the safety, robustness, and feasibility performance of RL agents. SafeOR-Gym is natively compatible with the OmniSafe framework, providing out-of-the-box support for constraint-handling algorithms, parallel training, and standardized benchmarking.
 
 The key contributions of this project:
 
@@ -10,9 +10,6 @@ The key contributions of this project:
 - A modular suite of nine OR-inspired SafeRL environments with varying structures, horizons, and complexities.
 
 - Ready-to-use integration with OmniSafe, enabling immediate use of a large number of SafeRL algorithms.
-
-- Empirical evaluation tools to assess safety violations, constraint satisfaction, and policy performance under structured conditions.
-
 
 ---
 
@@ -49,10 +46,11 @@ pip install setuptools==65.5.1
 pip install .
 cd ..
 ```
+Note: This repository uses a modified version of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
 
 ## Environments
 
-- **Air Separation Unit**: Optimize cryogenic gas separation with flow, temperature, and purity constraints.
+- **Production Scheduling in Air Separation Unit (ASUEnv)**: Optimize cryogenic gas separation with flow, temperature, and purity constraints.
 - **Generation and Transmission Expansion Planning (GTEPEnv)**: Plan capacity expansion in power systems under long-term investment and operational constraints.
 - **Grid Integrated Energy Storage (GridStorageEnv)**: Manage storage dispatch in a grid setting with price arbitrage and safety limits.
 - **Integrated Scheduling and Maintenance**: Jointly optimize production schedules and maintenance windows under equipment availability constraints.
@@ -65,19 +63,19 @@ cd ..
 
 ## Benchmarking Environments
 
-In order to run and benchmark your own code for each of the environments, the following files must be run respectively.
+Each environment has its own folder containing the relevant code. To run and benchmark an environment, execute the corresponding script located within its folder.
 
-| Environment                                | Main Script File                  |
-|--------------------------------------------|-----------------------------------|
-| Integrated Scheduling and Maintenance      | `ISM_safe_host.py`                |
-| Air Separation Unit (ASUenv)               | `Asu_safe_host.py`                |
-| Unit Commitment                            | `Unit_Commitment_Safe.py`         |
-| Generation & Transmission Expansion (GTEP) | `gen_transmission_exp_safe.py`    |
-| MultiPeriod Blending                       | `Blending_safe.py`                |
-| Grid Integrated Energy Storage             | `battery_env_safe.py`             |
-| Multi-Echelon Supply Chain                 | `supply_chain_safe.py`            |
-| Resource Task Network                      | `main.py`                         |
-| State Task Network                         | `main.py`                         |
+| Environment                                  | Main Script File                  |
+|--------------------------------------------  |-----------------------------------|
+| Production Scheduling in Air Separation Unit | `Asu_safe_host.py`                |
+| Generation & Transmission Expansion          | `gen_transmission_exp_safe.py`    |
+| Grid Integrated Energy Storage               | `battery_env_safe.py`             |
+| Integrated Scheduling and Maintenance        | `ISM_safe_host.py`                |
+| Multi-Echelon Supply Chain                   | `supply_chain_safe.py`            |
+| MultiPeriod Blending                         | `Blending_safe.py`                |
+| Resource Task Network                        | `main.py`                         |
+| State Task Network                           | `main.py`                         |
+| Unit Commitment                              | `Unit_Commitment_Safe.py`         |
 
 ### Benchmarking Setup (ExperimentGrid)
 
