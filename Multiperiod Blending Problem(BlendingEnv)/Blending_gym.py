@@ -39,8 +39,8 @@ class BlendEnv(gym.Env):
             - demand : A dictionary with keys being the output/demand streams and the values being the amount of materials in the corresponding inventory
             - properties: A dictionary with keys as tuples (j,q) where j is the blender and q is the property and the values being the 
             value of the properties of the materials in the blender
-            - source_avail_next: the schedule of source for the current and next few steps
-            - source_demand_next: the schedule of demand for the current and next few steps
+            - sources_avail: A nested dictionary with the schedule of source for the next few steps
+            - demands_avail: A nested dictionary with the schedule of demand for the next few steps
             - t: The current time period.
         All values are flattened into a single array for the observation space.
     Action space:
