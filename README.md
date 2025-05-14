@@ -22,6 +22,9 @@ The key contributions of this project:
 - [Environments](#environments)
 - [Benchmarked Algorithms](#benchmarked-algorithms)
 - [Citing This Work](#citing-this-work)
+- [License](#license)
+- [Contributions](#contributions)
+- [Contact](#contact)
 
 ---
 
@@ -80,7 +83,7 @@ In order to run and benchmark your own code for each of the environments, the fo
 
 This repository uses `ExperimentGrid` to manage and evaluate SafeRL training experiments. Below is an overview of its key functionality and a sample code block for running benchmarks.
 
-#### Key Features
+### Key Features
 
 - **Algorithms**: Choose from multiple categories including first-order, second-order, primal, and offline SafeRL methods.
 - **Environments**: Select environment(s) and config paths using `env_id` and `env_cfgs:env_init_config`.
@@ -92,7 +95,7 @@ This repository uses `ExperimentGrid` to manage and evaluate SafeRL training exp
 
 ---
 
-####  Benchmarking Code
+###  Benchmarking Code
 
 ```python
 eg = ExperimentGrid(exp_name='Benchmark_Safety_rtn_v0')
@@ -158,7 +161,7 @@ a = eg.evaluate(num_episodes = 10)
 
 
 
-### Citing this work
+## Citing this work
 If you find SafeOR-Gym useful, please cite it in your publication
 
 > ```bibtex
@@ -171,3 +174,14 @@ If you find SafeOR-Gym useful, please cite it in your publication
 > }
 > ```
 
+## License
+
+This repository is licensed under the [MIT License](LICENSE).
+
+## Contributions
+
+We welcome contributions and bug reports. If you'd like to extend the environments or benchmark a new algorithms for any environment, please open a pull request or issue.
+
+## Contact
+
+For questions, reach out to [canli.pse@gmail.com](mailto:canli.pse@gmail.com)
