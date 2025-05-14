@@ -56,13 +56,13 @@ class GASU(gym.Env):
             Num     Action
             0       Maintenance action (0 or 1)    : for each compressor
             1       Production rate (0 to 1)       : for each compressor
-            2       External purchase (0 to 10000) : for each compressor
+            2       External purchase (0 to 1)     : of some maximum capacity
 
         Reward:
             Type: float
             Cost = Production cost + External purchase cost
             Production cost = Production rate * Capacity * Specific energy * Electricity price
-            External purchase cost = External purchase Quantity * External purchase price
+            External purchase cost = External purchase Quantity * External purchase price * External purchase capacity
 
         Cost:
             Type: float
@@ -170,10 +170,10 @@ class GASU(gym.Env):
             return json.load(f)
 
     def assign_env_config(self, kwargs):
-        print("Assigning configuration...")
-        print(len(kwargs), "kwargs")
+        # print("Assigning configuration...")
+        # print(len(kwargs), "kwargs")
         for key, value in kwargs.items():
-            print(f"Trying to set {key} to {value!r}")
+            # print(f"Trying to set {key} to {value!r}")
             # 1) ensure it's in the schema
             if key not in self._CONFIG_SCHEMA:
                 raise AttributeError(f"{self!r} has no config attribute '{key}'")
@@ -185,7 +185,7 @@ class GASU(gym.Env):
                     f"got {type(value).__name__}"
                 )
             # 3) finally setattr
-            print(f"Setting {key} to {value!r}")
+            # print(f"Setting {key} to {value!r}")
             setattr(self, key, value)
         
     def _initialize_simulation_data(self):
@@ -577,10 +577,6 @@ class GASU(gym.Env):
         production_rate = action[n:2*n]
         external_purchase = action[-1:]  # keeps it as shape (1,)
 
-        epsilon = 0.01
-        production_rate = np.where(np.abs(production_rate) < epsilon, 0.0, production_rate)
-        external_purchase = np.where(np.abs(external_purchase) < epsilon, 0.0, external_purchase)
-
         return {
             "maintenance_action": maintenance_action,
             "production_rate": production_rate,
@@ -655,19 +651,10 @@ class GASU(gym.Env):
 
         if self.current_day == self.T:       # one month (31 days)
             self.terminated = True                 # end of episode
-    
-        
-        # return self.flatt_state, self.reward - self.cost, self.done, truncated, self.info
 
-        # print("self.flatt_state", self.state)
 
         self.flatt_state = self.encode_observation(self.state)
         flatt_state_tensor = th.tensor(self.flatt_state, dtype = th.float32, device=self._device)
-
-        # print( "self.flatt_state_tensor from step", flatt_state_tensor.shape)
-
-        # print(f"[DEBUG] step returns obs shape: {flatt_state_tensor.shape}")
-
         return flatt_state_tensor, th.tensor(reward-cost, dtype = th.float32, device=self._device), th.tensor(self.terminated, dtype = th.bool, device=self._device), th.tensor(self.truncated, dtype = th.bool, device=self._device), {}
 
     def _get_state(self, mode):
@@ -719,6 +706,10 @@ class GASU(gym.Env):
         external_purchase_price = alpha*average_compressor_price
         self.external_purchase_price = external_purchase_price     # $/ton
         return self.external_purchase_price
+    
+    def get_external_purchase_capacity(self):
+        self.max_capacity = max(comp.capacity for comp in self.compressors.values())
+        return self.max_capacity
     
     def initialize_compressors(self):
         try:
@@ -772,7 +763,7 @@ class GASU(gym.Env):
 # --- Compressor Class ---
 class Compressor:
     def __init__(self, comp_id, capacity, specific_energy, mttf, mttr, mntr, TLCM, TSLM, CDM):
-        self.scale = 1000
+        self.scale = 750
         self.comp_id = comp_id
         self.capacity = capacity
         self.specific_energy = specific_energy/self.scale

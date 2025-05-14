@@ -81,6 +81,7 @@ class optimize_GASU:
         self.model.D = pyo.Param(self.model.T_bar, initialize=0, mutable=True, doc="Demand")
         self.model.ELP = pyo.Param(self.model.T_bar, initialize=0, mutable=True, doc="Electricty Price")
         self.model.EXPP = pyo.Param(initialize=0, mutable=True, doc="External Purchase Price, $/MWh")
+        self.model.EXPC = pyo.Param(initialize=0, mutable=True, doc="External Purchase Capacity, ton/day")
         # Mode and Switch History Parameters
         self.model.y_i = pyo.Param(self.model.C, self.model.M, initialize=0, mutable=True, doc="Mode history")
         self.model.z_h = pyo.Param(self.model.C, self.model.M, self.model.M, self.model.T_z, initialize=0, mutable=True, doc="Switch history")
@@ -115,6 +116,9 @@ class optimize_GASU:
 
     def _update_external_purchase_price(self, external_purchase_price):
         self.model.EXPP.set_value(external_purchase_price) 
+
+    def _update_external_purchase_capacity(self, external_purchase_capacity):
+        self.model.EXPC.set_value(external_purchase_capacity + 2) 
     
     def _update_information_state(self, demand_array, price_array):
         for t in self.model.T_bar:
@@ -178,6 +182,7 @@ class optimize_GASU:
         '''
         self.model.ELC = pyo.Var(self.model.T_bar, within=pyo.NonNegativeReals, doc="Electricity Consumption, KWh/day")
         self.model.EXPQ = pyo.Var(self.model.T_bar, within=pyo.NonNegativeReals, doc="External Purchase Quantity, ton/day")
+        # self.model.EXPQ = pyo.Var(self.model.T_bar, within=pyo.UnitInterval, doc="Fraction of Max External Purchase Quantity, ton/day")
         self.model.PD_bar = pyo.Var(self.model.C, self.model.M, self.model.T_bar, within=pyo.NonNegativeReals, doc="Mode specfic production, ton/day")
         self.model.PD = pyo.Var(self.model.C, self.model.T_bar, within=pyo.NonNegativeReals, doc="Total production, ton/day")
         self.model.R = pyo.Var(self.model.C, self.model.M, self.model.T_bar, within=pyo.NonNegativeReals, doc="Ramp rate")
@@ -187,10 +192,10 @@ class optimize_GASU:
         self.model.z = pyo.Var(self.model.C, self.model.M, self.model.M, self.model.T, within=pyo.Binary, doc="Switch decision")
     
     def _define_constraints(self):
-        
+
         # Demand Satisfaction Constraint
         def demand_satisfaction_rule(model, t):
-            return sum(model.PD[c, t] for c in model.C) + model.EXPQ[t] == model.D[t]
+            return sum(model.PD[c, t] for c in model.C) + model.EXPQ[t]  == model.D[t]
         self.model.demand_satisfaction = pyo.Constraint(self.model.T_bar, rule=demand_satisfaction_rule)
 
         # Production Constraint
@@ -321,6 +326,7 @@ class optimize_GASU:
 
         # --- 3. External purchase
         ext_purchase = float(pyo.value(self.model.EXPQ[t]))
+        ext_purchase = ext_purchase/pyo.value(self.model.EXPC)
         action["external_purchase"] = np.array([ext_purchase], dtype=np.float32)
         
         flat_action = self.encode_action(action)
@@ -329,7 +335,7 @@ class optimize_GASU:
     def action_horizon_cost(self):  
         t = 1  # action horizon is 1
         energy_cost = pyo.value(self.model.ELC[t]) * pyo.value(self.model.ELP[t])
-        purchase_cost = pyo.value(self.model.EXPQ[t]) * pyo.value(self.model.EXPP)
+        purchase_cost = pyo.value(self.model.EXPQ[t]) * pyo.value(self.model.EXPP) 
         cost = energy_cost + purchase_cost
         return cost
     
