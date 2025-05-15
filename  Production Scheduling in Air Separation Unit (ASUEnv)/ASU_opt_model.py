@@ -1,6 +1,7 @@
 import pyomo.environ as pyo
 import json
 import numpy as np
+from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 from pyomo.environ import value
@@ -9,26 +10,22 @@ from scipy.spatial import ConvexHull
 import logging
 import os
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(current_dir, 'asu_config.json')
-# Load the configuration mapping from a JSON file
-with open(config_path, 'r') as config_file:
-   ASU_DATA_FILES = json.load(config_file)
-
 class optimize_ASU:
         
-   def __init__(self, asu_name, lookahead):
+   def __init__(self, asu_name: str, **kwargs: Any):
       
       self.name = asu_name
+      lookahead = kwargs.get('lookahead',1) 
       self.lookahead = lookahead  # number of days to look ahead
-      # Get the data file path from the configuration
-      data_file = ASU_DATA_FILES.get(asu_name)
-      if data_file is None:
-         raise ValueError(f"Unknown ASU identifier: {asu_name}")
-      
-      # Load the ASU data from the JSON file
-      with open(data_file, 'r') as file:
-         self.loaded_data = json.load(file)
+
+      config_path = kwargs.get('config_path')
+      if config_path is None:
+         raise ValueError("config_path must be provided to optimize_ASU.")
+      config_fp = Path(config_path)
+      if not config_fp.is_file():
+         raise FileNotFoundError(f"Config file not found: {config_fp!r}")
+      with config_fp.open('r') as f:
+         self.loaded_data = json.load(f)
       
       # self.loaded_data = loaded_data
       self.model = pyo.ConcreteModel()
