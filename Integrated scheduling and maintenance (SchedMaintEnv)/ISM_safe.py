@@ -25,7 +25,7 @@ import os
 import numpy as np
 import omnisafe
 
-from GASU_env_host import GASU
+from SchedMaint_env import GASU
 
 @env_register
 class GASU_env_safe(CMDP):
