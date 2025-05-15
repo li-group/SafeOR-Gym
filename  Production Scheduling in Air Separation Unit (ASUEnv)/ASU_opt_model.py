@@ -1,13 +1,3 @@
-'''  THOUGHTS TO FOLLOW 
-FOR PSE GYM::
-  --->>  Build optimization model along with ability to do external product purchase to handle infeasibility.
-
-  --->>  y_i, IV_i and z_history have to be mutable parameters, demand and electricity prices have to be mutable parameters
-
-TWO MODES: ('ON' and 'OFF') 
-   - Satisfy daily demand for each product (considered to be feasible) with hourly product production. (lambdas' in convex hull)
-'''
-
 import pyomo.environ as pyo
 import json
 import numpy as np
@@ -23,7 +13,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(current_dir, 'asu_config.json')
 # Load the configuration mapping from a JSON file
 with open(config_path, 'r') as config_file:
-    ASU_DATA_FILES = json.load(config_file)
+   ASU_DATA_FILES = json.load(config_file)
 
 class optimize_ASU:
         
