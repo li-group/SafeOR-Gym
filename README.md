@@ -67,7 +67,7 @@ Each environment has its own folder containing the relevant code. To run and ben
 
 | Environment                                  | Main Script File                  |
 |--------------------------------------------  |-----------------------------------|
-| Production Scheduling in Air Separation Unit | `Asu_safe_host.py`                |
+| Production Scheduling in Air Separation Unit | `ASU_safe.py`                     |
 | Generation & Transmission Expansion          | `gen_transmission_exp_safe.py`    |
 | Grid Integrated Energy Storage               | `battery_env_safe.py`             |
 | Integrated Scheduling and Maintenance        | `ISM_safe_host.py`                |
