@@ -70,7 +70,7 @@ Each environment has its own folder containing the relevant code. To run and ben
 | Production Scheduling in Air Separation Unit | `ASU_safe.py`                     |
 | Generation & Transmission Expansion          | `gen_transmission_exp_safe.py`    |
 | Grid Integrated Energy Storage               | `battery_env_safe.py`             |
-| Integrated Scheduling and Maintenance        | `ISM_safe_host.py`                |
+| Integrated Scheduling and Maintenance        | `ISM_safe.py`                     |
 | Multi-Echelon Supply Chain                   | `supply_chain_safe.py`            |
 | MultiPeriod Blending                         | `Blending_safe.py`                |
 | Resource Task Network                        | `main.py`                         |
