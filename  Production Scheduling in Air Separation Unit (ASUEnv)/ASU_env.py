@@ -5,9 +5,8 @@ Akshdeep Singh Ahluwalia
 
 import numpy as np
 import gymnasium as gym
-from gymnasium import spaces        # https://gymnasium.farama.org/
+from gymnasium import spaces      
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
-
 from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete
 from gymnasium.utils import seeding
 import json
@@ -21,7 +20,9 @@ from scipy.spatial import ConvexHull
 from typing import Any
 import torch
 import matplotlib.pyplot as plt
-# import matplotlib.pyplot as plt
+# from utils import load_config, assign_env_config,
+from utils import decode_action, encode_observation
+from utils import load_config, assign_env_config
 from pathlib import Path
 
 class ASUEnv(gym.Env):
@@ -71,12 +72,14 @@ class ASUEnv(gym.Env):
 
         self.env_id = env_id
         self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
-
-        self.config_path = kwargs.get("config_path", None)
-        if self.config_path is None:
+    
+        config_path = kwargs.get('config_path')
+        if config_path is None:
             raise ValueError("config_path must be provided for ASUEnv.")
-        self.config_data = self._load_config() 
-        self.assign_env_config(self.config_data)
+        # Load and assign configuration, Load and stash raw config, then assign each field
+        config_data = load_config(config_path)
+        self.config_data = config_data              # ← add this line
+        assign_env_config(self, config_data, self._CONFIG_SCHEMA)
 
         # Simulation time counters
         self.current_hour = 0  # hour in current day (0-23)
@@ -87,7 +90,7 @@ class ASUEnv(gym.Env):
         self._initialize_simulation_data()
         self._initialize_observation_space()
         self._initialize_action_space()
-        # self._initialize_state()
+
 
         self.terminated = False
         self.truncated = False
@@ -101,29 +104,6 @@ class ASUEnv(gym.Env):
                         'Number of Demand Violation': 0,
                         'Cost of Demand Violation': 0,
                         }
-    
-    def _load_config(self):
-        with open(self.config_path, 'r') as f:
-            return json.load(f)
-
-    def assign_env_config(self, kwargs):
-        # print("Assigning configuration...")
-        # print(len(kwargs), "kwargs")
-        for key, value in kwargs.items():
-            # print(f"Trying to set {key} to {value!r}")
-            # 1) ensure it's in the schema
-            if key not in self._CONFIG_SCHEMA:
-                raise AttributeError(f"{self!r} has no config attribute '{key}'")
-            # 2) type‐check
-            expected_type = self._CONFIG_SCHEMA[key]
-            if not isinstance(value, expected_type):
-                raise TypeError(
-                    f"Config '{key}' expects type {expected_type.__name__}, "
-                    f"got {type(value).__name__}"
-                )
-            # 3) finally setattr
-            # print(f"Setting {key} to {value!r}")
-            setattr(self, key, value)
 
     def _initialize_simulation_data(self):
         # Convert string keys to integers
@@ -380,36 +360,6 @@ class ASUEnv(gym.Env):
         else:
             self.shift_observation()
 
-    def decode_action(self, action):
-        """
-        Decode the action from the action space.
-        This method converts the raw action into a structured format.
-        """
-        # Assuming action is a numpy array of shape (row_liqprod,)
-        # Convert to dictionary format
-        action_dict = {
-            'lambda': action
-        }
-        return action_dict
-    
-    def encode_observation(self, state):
-        """
-        Encode the observation into a flattened format.
-        This method converts the state dictionary into a single array.
-        """
-        # Flatten the state dictionary into a single array
-        flatt_state = np.concatenate([
-            state['electricity_prices'],
-            state['demand'].flatten(),
-            state['IV']
-        ])
-        # Electricity prices: 24 * (1+self.lookahead_days): 
-        # Demand: len(self.products) * 24 * (1+self.lookahead_days)
-        # IV: len(self.products)
-        # flatt_state.shape = (24 * (1+self.lookahead_days) + len(self.products) * 24 * (1+self.lookahead_days) + len(self.products),)
-        # For current:    -->  24*5 + 24*3*5 + 3
-        return flatt_state
-
     def step(self, raw_action):
 
         trucnated = False
@@ -424,7 +374,9 @@ class ASUEnv(gym.Env):
 
         # make sure the action is within the valid range
         action = np.clip(action, self.action_space.low, self.action_space.high)
-        action_dict = self.decode_action(action)     
+        # action_dict = self.decode_action(action) 
+        action_dict = decode_action(action)
+
         lambda_action = action_dict['lambda']
 
         # Validate action dimensions
@@ -481,7 +433,8 @@ class ASUEnv(gym.Env):
         if self.current_day*24 == self.T:
             self.terminated = True
 
-        self.flatt_state = self.encode_observation(self.state)
+        # self.flatt_state = self.encode_observation(self.state)
+        self.flatt_state = encode_observation(self.state)
         flatt_state_tensor = th.tensor(self.flatt_state, dtype = th.float32, device=self._device)
 
         # print(self.env_spec_log)
@@ -532,7 +485,8 @@ class ASUEnv(gym.Env):
         self.info = {}
 
         self._initialize_state()
-        self.flatt_state = self.encode_observation(self.state)
+        # self.flatt_state = self.encode_observation(self.state)
+        self.flatt_state = encode_observation(self.state)
         flatt_state_tensor = th.tensor(self.flatt_state, dtype=th.float32, device=self._device)
 
         # print("self.flatt_state_tensor from reset", flatt_state_tensor.shape)

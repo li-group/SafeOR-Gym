@@ -6,6 +6,7 @@ Akshdeep Singh Ahluwalia
 import random
 import json
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
+from typing import Any, Dict 
 import torch
 import numpy as np
 import scipy.stats as stats
@@ -23,6 +24,10 @@ from PIL import Image, ImageDraw, ImageFont
 import math
 from pathlib import Path
 import matplotlib.pyplot as plt
+from utils import (
+    load_config, assign_env_config,
+    decode_action_util, encode_observation_util
+)
              
 # --- Plant Class ---
 class GASU(gym.Env):
@@ -109,19 +114,18 @@ class GASU(gym.Env):
         self.env_id = env_id
         self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
         
-        self.config_path = kwargs.get("config_path", None)
-        if self.config_path is None:
-            raise ValueError("config_path must be provided for MyEnv.")
-        self.config_data = self._load_config() 
-
-        # Assign attributes like demand, electricity_prices
-        self.assign_env_config(self.config_data)
+        config_path = kwargs.get('config_path')
+        if config_path is None:
+            raise ValueError("config_path must be provided for ASUEnv.")
+        # Load and assign configuration, Load and stash raw config, then assign each field
+        config_data = load_config(config_path)
+        self.config_data = config_data              # ← add this line
+        assign_env_config(self, config_data, self._CONFIG_SCHEMA)
 
         self.demand_array = np.array(self.config_data["demand"])
         self.price_array = np.array(self.config_data["electricity_prices"])
         self.compressors = self.config_data["compressors"]
 
-        
         # First initialize the compressors
         self.compressors = {}
         self.initialize_compressors()
@@ -211,11 +215,9 @@ class GASU(gym.Env):
         self.info = {}
 
         self._initialize_state()
-        self.flatt_state = self.encode_observation(self.state)
-        
+        self.flatt_state = encode_observation_util(self.state, ["demand","electricity_price","TLCM","TSLM","CDM"])
         flatt_state_tensor = th.tensor(self.flatt_state, dtype=th.float32, device=self._device)
-        # print("self.flatt_state_tensor from reset", flatt_state_tensor.shape)
-
+        
         return flatt_state_tensor, {"dict_state": self.state, "terminated": self.terminated, "truncated": self.truncated}
 
     def _initialize_observation_space(self):
@@ -517,31 +519,6 @@ class GASU(gym.Env):
         action["maintenance_action"] = maintenance_action
         action["production_rate"] = production_rate
 
-    def decode_action(self, action):
-        n = len(self.compressors)
-        maintenance_action = np.round(action[:n]).astype(int)
-        production_rate = action[n:2*n]
-        external_purchase = action[-1:]  # keeps it as shape (1,)
-
-        return {
-            "maintenance_action": maintenance_action,
-            "production_rate": production_rate,
-            "external_purchase": external_purchase
-        }
-    
-    def encode_observation(self, state):
-        """
-        Converts a structured observation dictionary into a flat NumPy array
-        compatible with the Box observation space.
-        """
-        demand = np.array(state["demand"], dtype=np.float32)                        # shape (S,)
-        electricity_price = np.array(state["electricity_price"], dtype=np.float32)  # shape (S,)
-        tlcm = np.array(state["TLCM"], dtype=np.float32)                            # shape (n,)
-        tslm = np.array(state["TSLM"], dtype=np.float32)                            # shape (n,)
-        cdm = np.array(state["CDM"], dtype=np.float32)                              # shape (n,), encoded as float
-        flatt_state = np.concatenate([demand, electricity_price, tlcm, tslm, cdm]).astype("float32")
-        return flatt_state
-
     def step(self, raw_action):
         truncated = False
 
@@ -555,7 +532,8 @@ class GASU(gym.Env):
         
         # make sure the action is within the valid range
         action = np.clip(action, self.action_space.low, self.action_space.high)
-        action_dict = self.decode_action(action)
+        action_dict = decode_action_util(action, len(self.compressors))
+        # action_dict = self.decode_action(action)
         
         ## COST INCURRED AS PER THE PLANT CONFIGURATION and EXTERNAL PURCHASE
         real_cost = self.production_and_external_purchase_cost(action_dict)
@@ -593,8 +571,7 @@ class GASU(gym.Env):
         if self.current_day == self.T:       # one month (31 days)
             self.terminated = True                 # end of episode
 
-
-        self.flatt_state = self.encode_observation(self.state)
+        self.flatt_state = encode_observation_util(self.state, ["demand","electricity_price","TLCM","TSLM","CDM"])
         flatt_state_tensor = th.tensor(self.flatt_state, dtype = th.float32, device=self._device)
         return flatt_state_tensor, th.tensor(reward-cost, dtype = th.float32, device=self._device), th.tensor(self.terminated, dtype = th.bool, device=self._device), th.tensor(self.truncated, dtype = th.bool, device=self._device), {}
 
