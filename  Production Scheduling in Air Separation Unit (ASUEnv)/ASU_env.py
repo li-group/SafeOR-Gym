@@ -104,6 +104,10 @@ class ASUEnv(gym.Env):
                         'Number of Demand Violation': 0,
                         'Cost of Demand Violation': 0,
                         }
+    
+    def _get_lookahead_days(self):
+        """Get the number of lookahead days."""
+        return self.lookahead_days
 
     def _initialize_simulation_data(self):
         # Convert string keys to integers
