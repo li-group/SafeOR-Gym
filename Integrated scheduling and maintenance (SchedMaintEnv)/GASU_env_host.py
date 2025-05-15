@@ -218,40 +218,6 @@ class GASU(gym.Env):
 
         return flatt_state_tensor, {"dict_state": self.state, "terminated": self.terminated, "truncated": self.truncated}
 
-    # def _initialize_observation_space(self):
-        # self.max_mttr = max(comp.mttr for comp in self.compressors.values())
-        # self.total_capacity = sum(comp.capacity for comp in self.compressors.values())
-        # n = len(self.compressors)
-        # S = self.state_horizon
-
-        # self.observation_space = Dict({
-        #     "demand": Box(
-        #         low=0.0,
-        #         high=self.total_capacity * 10,
-        #         shape=(S,),
-        #         dtype=np.float32
-        #     ),
-        #     "electricity_price": Box(
-        #         low=0.0,
-        #         high=10.0,
-        #         shape=(S,),
-        #         dtype=np.float32
-        #     ),
-        #     "TLCM": Box(  # Time Left to Complete Maintenance (days)
-        #         low=0.0,
-        #         high=self.max_mttr,
-        #         shape=(n,),
-        #         dtype=np.float32
-        #     ),
-        #     "TSLM": Box(  # Time Since Last Maintenance (days)
-        #         low=0.0,
-        #         high=100.0,
-        #         shape=(n,),
-        #         dtype=np.float32
-        #     ),
-        #     "CDM": MultiBinary(n)  # Can Do Maintenance: binary mask
-        # })
-
     def _initialize_observation_space(self):
         self.max_mttr = max(comp.mttr for comp in self.compressors.values())
         self.total_capacity = sum(comp.capacity for comp in self.compressors.values())
@@ -280,16 +246,6 @@ class GASU(gym.Env):
             [1.0] * n                          # CDM
         )
 
-        # high_dim = high.shape[0]
-        # low_dim = low.shape[0]
-
-        # Set observation space as a flat Box
-        # self.observation_space = Box(
-        #     low=low,
-        #     high=high, 
-        #     shape=(obs_dim,),
-        #     dtype=np.float32
-        # )
         self.observation_space = Box(
             low=0,
             high=1000, 
@@ -397,9 +353,6 @@ class GASU(gym.Env):
 
         self.update_information_state()
         self.update_compressor_physical_condition_state()
-
-        # UPDATE STATE TO MATCH: Gym-compliant obs tensor for learning !!
-        # return self.state
 
     def production_and_external_purchase_cost(self, action):
         cost = 0
@@ -519,15 +472,8 @@ class GASU(gym.Env):
 
         # Apply penalty if demand not met exactly
          
-        if abs(demand_today - total_supplied) > 10:    # OLD--> Absolute error 
-        # if abs(demand_today - total_supplied) > 100:    # OLD--> Absolute error 
-        # # if abs(demand_today - total_supplied)/demand_today > 0.1:    # NEW--> Relative error: 10% of demand
-        #     penalty = self.Penalty_demand * abs(demand_today - total_supplied)/10
-        # elif abs(demand_today - total_supplied) > 10 and abs(demand_today - total_supplied) <= 100:
-        #     penalty = self.Penalty_demand * abs(demand_today - total_supplied)
-        # elif abs(demand_today - total_supplied) > 1 and abs(demand_today - total_supplied) <= 10:
+        if abs(demand_today - total_supplied) > 10:   
             penalty = self.Penalty_demand * abs(demand_today - total_supplied)
-
 
         if penalty > 0:
             self.env_spec_log['Number of Demand-Unsatisfaction Violation'] += 1
@@ -594,11 +540,6 @@ class GASU(gym.Env):
         tslm = np.array(state["TSLM"], dtype=np.float32)                            # shape (n,)
         cdm = np.array(state["CDM"], dtype=np.float32)                              # shape (n,), encoded as float
         flatt_state = np.concatenate([demand, electricity_price, tlcm, tslm, cdm]).astype("float32")
-
-        # print("flatt_state shape ", flatt_state.shape)
-
-        # print("flatt_state shap [0]", flatt_state.shape[0])
-        
         return flatt_state
 
     def step(self, raw_action):
