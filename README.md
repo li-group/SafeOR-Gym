@@ -158,20 +158,6 @@ a = eg.evaluate(num_episodes = 10)
 ```
 
 
-
-## Citing this work
-If you find SafeOR-Gym useful, please cite it in your publication
-
-> ```bibtex
-> @article{,
->   author  = {THE LI GROUP},
->   title   = {SafeOR-Gym: A Benchmark Suite for Safe Reinforcement Learning Algorithms on Practical Operations Research Problems},
->   journal = {Coming soon},
->   year    = {2025},
->   url     = {}
-> }
-> ```
-
 ## License
 
 This repository is licensed under the [MIT License](LICENSE).
@@ -180,6 +166,4 @@ This repository is licensed under the [MIT License](LICENSE).
 
 We welcome contributions and bug reports. If you'd like to extend the environments or benchmark a new algorithms for any environment, please open a pull request or issue.
 
-## Contact
 
-For questions, reach out to [canli.pse@gmail.com](mailto:canli.pse@gmail.com)
