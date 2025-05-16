@@ -298,7 +298,7 @@ class ASUEnv(gym.Env):
             updated_prices = np.concatenate((remaining_prices, padding_prices))
             self.state['electricity_prices'] = updated_prices
 
-    def production_quantity_and_cost(self, lambda_action):
+    def compute_reward(self, lambda_action):
         """
         Calculate production cost based on lambda_action.
         Returns the production vector (for each product) and production cost.
@@ -315,7 +315,7 @@ class ASUEnv(gym.Env):
         prod_cost = (dynamic_cost_total + fixed_cost_total) * self.state['electricity_prices'][0]  # Use the first hour's price for cost calculation
         return production_vector, prod_cost
     
-    def demand_penalty(self, ship_quantity):
+    def compute_demand_cost(self, ship_quantity):
         # --- Penalty 1: Demand Shortfall at End of Day ---
         # Calculate demand shortfall
         demand_penalty = 0
@@ -327,7 +327,7 @@ class ASUEnv(gym.Env):
             self.env_spec_log['Cost of Demand Violation'] += demand_penalty
         return demand_penalty
 
-    def inventory_penalty(self):
+    def compute_inventory_penalty(self):
         # --- Penalty 2: Inventory Exceeding Maximum --- 
         # For each product, if new_IV > iv_high, impose a penalty proportional to the excess
         # inventory_excess = np.maximum(new_IV - self.iv_high, 0)
@@ -392,7 +392,7 @@ class ASUEnv(gym.Env):
             lambda_action = lambda_action / total
 
         # --- Production Cost and Production Vector ---
-        production_vector, prod_cost = self.production_quantity_and_cost(lambda_action)
+        production_vector, prod_cost = self.compute_reward(lambda_action)
 
         # PENALTY 1: DEMAND SHORTFALL
         # demand_today = self.state['demand'][:, 23]  # Demand forecast for the current day (for each product) # Check demand for the present day: the 24th hour in the shifted demand array (index 23)
@@ -402,7 +402,7 @@ class ASUEnv(gym.Env):
             # Update inventory after shipping
             # new_IV = self.IV + production_vector - ship_quantity
             self.IV += production_vector - ship_quantity
-            demand_penalty = self.demand_penalty(ship_quantity)
+            demand_penalty = self.compute_demand_cost(ship_quantity)
         else:
             # For other hours, just update inventory with production
             # new_IV = self.IV + production_vector
@@ -410,7 +410,7 @@ class ASUEnv(gym.Env):
             demand_penalty = 0
         
         # PENALTY 2: INVENTORY 
-        inventory_penalty = self.inventory_penalty()
+        inventory_penalty = self.compute_inventory_penalty()
 
         # Positive cost (penalties) incurred
         self.cost_ep += inventory_penalty + demand_penalty

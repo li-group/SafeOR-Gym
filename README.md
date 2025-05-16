@@ -50,7 +50,7 @@ Note: This repository uses a modified version of [OmniSafe](https://github.com/P
 
 ## Environments
 
-- **Production Scheduling in Air Separation Unit (ASUEnv)**: Optimize cryogenic gas separation with flow, temperature, and purity constraints.
+- **Production Scheduling in Air Separation Unit (ASUEnv)**: Optimize liquid production to minimize electricity and production costs, while fulfilling demand and respecting unit capacities across time.
 - **Generation and Transmission Expansion Planning (GTEPEnv)**: Plan capacity expansion in power systems under long-term investment and operational constraints.
 - **Grid Integrated Energy Storage (GridStorageEnv)**: Manage storage dispatch in a grid setting with price arbitrage and safety limits.
 - **Integrated Scheduling and Maintenance**: Jointly optimize production schedules and maintenance windows under equipment availability constraints.
