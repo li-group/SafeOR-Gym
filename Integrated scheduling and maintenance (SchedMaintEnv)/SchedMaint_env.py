@@ -198,21 +198,30 @@ class GASU(gym.Env):
 
         self.demand_array = np.array(demand)
         self.price_array = np.array(electricity_prices)
-
         # return self.demand_array, self.price_array
+
+    def _sample_stochastic_mttf(self, rng: np.random.Generator):
+        """Randomise each compressor’s MTTF ∈ {t, t-1, t-2} equiprobably."""
+        for comp in self.compressors.values():
+            delta = rng.integers(0, 3)        # 0, 1 or 2 w.p. 1/3
+            comp.mttf = max(comp.nominal_mttf - delta, 1)  # never < 1 day
              
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         self.current_day = 0
-        
-        self.reward_ep = 0
-        self.cost_ep = 0
-
-        self.cost = 0
-        self.reward = 0
+        self.reward_ep = self.cost_ep = self.cost = self.reward = 0.0
+        self.terminated = self.truncated = False
+        self.info = {}
 
         self.terminated = False 
         self.truncated = False
         self.info = {}
+    
+        # ---- reproducible RNG ----
+        self.np_random, seed = gym.utils.seeding.np_random(seed)
+        rng = self.np_random                       # alias
+        # ---- version-specific stochasticity ----
+        if self.env_id == "GASU-v1":
+            self._sample_stochastic_mttf(rng)
 
         self._initialize_state()
         self.flatt_state = encode_observation_util(self.state, ["demand","electricity_price","TLCM","TSLM","CDM"])
@@ -628,6 +637,17 @@ class GASU(gym.Env):
     def get_external_purchase_capacity(self):
         self.max_capacity = max(comp.capacity for comp in self.compressors.values())
         return self.max_capacity
+
+    def override_compressors(self, comp_info_dict: dict, *, keep_dynamic=True):
+        new_bank = {}
+        for cid, cfg in comp_info_dict.items():
+            new_c = Compressor(**cfg)
+            if keep_dynamic and cid in self.compressors:
+                old = self.compressors[cid]
+                new_c.TLCM, new_c.TSLM, new_c.CDM = old.TLCM, old.TSLM, old.CDM
+            new_bank[cid] = new_c
+        self.compressors = new_bank
+
     
     def initialize_compressors(self):
         try:
@@ -686,6 +706,7 @@ class Compressor:
         self.capacity = capacity
         self.specific_energy = specific_energy/self.scale
         self.mttf = mttf
+        self.nominal_mttf = mttf 
         self.mttr = mttr
         self.mntr = mntr
         self.TLCM = TLCM
@@ -703,7 +724,6 @@ class Compressor:
             "TLCM": self.TLCM,
             "TSLM": self.TSLM,
             "CDM": self.CDM,
-            
         }
         return comp_dict
 

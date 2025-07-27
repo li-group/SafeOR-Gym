@@ -127,10 +127,17 @@ if __name__ == '__main__':
         warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
         gpu_id = None
 
-    num_episodes_per_epoch = 60                         # 250
+    # num_episodes_per_epoch = 60                         # 250
+    # episode_length = 168  # assume your env has T=7     # 168
+    # num_steps_per_epoch = episode_length * num_episodes_per_epoch
+    # total_epochs = 300
+    # total_steps = num_steps_per_epoch * total_epochs
+
+    # dummy
+    num_episodes_per_epoch = 1                     # 250
     episode_length = 168  # assume your env has T=7     # 168
     num_steps_per_epoch = episode_length * num_episodes_per_epoch
-    total_epochs = 300
+    total_epochs = 1
     total_steps = num_steps_per_epoch * total_epochs
 
     env_config = json.load(open("asuenv_config.json"))
@@ -164,5 +171,7 @@ if __name__ == '__main__':
     a = eg.evaluate(num_episodes=10)
     
     print(dir(eg))
+    print("Check3",eg._evaluator._actor)
+    print("Check4",eg._evaluator._cfgs)
 
     
