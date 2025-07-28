@@ -34,8 +34,8 @@ class ASUEnv(gym.Env):
 
         Attributes:
         Observation Space:
-            - electricity_prices: Electricity prices for the next 24 hours.
-            - demand: Demand forecast for each product for the next 24 hours.
+            - electricity_prices: Electricity prices for the next (1 + lookahead) * 24 hours.
+            - demand: Demand forecast for each product for the next (1 + lookahead) * 24 hours.
             - IV: Current inventory levels for each product.
         
         Action Space:
