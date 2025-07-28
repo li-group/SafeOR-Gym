@@ -35,16 +35,10 @@ The key contributions of this project:
 
 ### Install
 
+Simply run the bash file requirements.sh. The file can be modified to change the environment name or use any other package manager.
+
 ```bash
-git clone https://github.com/li-group/SafeOR-Gym.git
-cd SafeOR-Gym
-conda env create safe_rl_env
-conda activate safe_rl_env
-pip install pyomo
-cd omnisafe
-pip install setuptools==65.5.1
-pip install .
-cd ..
+bash requirements.sh
 ```
 Note: This repository uses a modified version of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
 
