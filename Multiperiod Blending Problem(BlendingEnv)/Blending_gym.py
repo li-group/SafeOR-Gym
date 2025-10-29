@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import copy
 import os, sys
-from utils import assign_env_config,flatten_and_track_mappings,reconstruct_dict,convert_dict_to_tuple_keys,flatten_dict,convert_tuple_keys_to_string,get_jsons,get_sbp,convert_string_keys_to_tuple,clip
+from utils import flatten_and_track_mappings,reconstruct_dict,convert_dict_to_tuple_keys,flatten_dict,convert_tuple_keys_to_string,get_jsons,get_sbp,convert_string_keys_to_tuple,clip
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
 import random
 class BlendEnv(gym.Env):
@@ -122,9 +122,9 @@ class BlendEnv(gym.Env):
         self.eps = 1e-3
         
         self.illegal_act_handling = "disable"
-        self.tau0   = {'s1': [10, 10, 10, 0, 0, 0],  's2': [30, 30, 30, 0, 0, 0]}
-        self.MAXFLOW = sum(sum(self.tau0[s]) for s in self.tau0.keys())
-        self.delta0 = {'p1': [0, 0, 15, 15, 15, 15], 'p2': [0, 0, 15, 15, 15, 15]}
+        self.tau0   = {'s1': {'0': 10, '1': 10, '2': 10, '3': 0, '4': 0, '5': 0},  's2': {'0': 30, '1': 30, '2': 30, '3': 0, '4': 0, '5': 0}}
+        self.MAXFLOW = sum(sum(self.tau0[s].values()) for s in self.tau0.keys())
+        self.delta0 = {'p1': {'0': 0, '1': 0, '2': 15, '3': 15, '4': 15, '5': 15}, 'p2': {'0': 0, '1': 0, '2': 15, '3': 15, '4': 15, '5': 15}}
         self.sigma = {"s1":{"q1": 0.06,"q2":0.10}, "s2":{"q1": 0.26,"q2":0.5}} # Source concentrations
         self.sigma_ub = {"p1":{"q1": 0.16,"q2":0.8}, "p2":{"q1": 1,"q2":0.9}} # Demand concentrations UBs
         self.sigma_lb = {"p1":{"q1": 0,"q2":0}, "p2":{"q1": 0,"q2":0}}    # Demand concentrations LBs
@@ -151,9 +151,12 @@ class BlendEnv(gym.Env):
                 env_config_read = f.read()
             env_config = json.loads(env_config_read)
             print(env_config)
-            assign_env_config(self, env_config['env_init_cfgs'])
-        except:
-            print("File not read")
+            # Inline configuration assignment - keep all keys as strings for consistency
+            for key, value in env_config['env_init_cfgs'].items():
+                setattr(self, key, value)
+        except Exception as e:
+            print(f"File not read: {e}")
+            print("Using default values")
         with open(self.action_sample_file ,"r") as f:
             action = f.read()
         self.action_sample = json.loads(action)
@@ -177,9 +180,9 @@ class BlendEnv(gym.Env):
             elif(val[0]=="properties"):
                 obs_high_list[k] = 100
             elif(val[0]=="sources_avail"):
-                obs_high_list[k] = max(self.tau0[val[1]])
+                obs_high_list[k] = max(self.tau0[val[1]].values())
             elif(val[0]=="demands_avail"):
-                obs_high_list[k] = max(self.delta0[val[1]])
+                obs_high_list[k] = max(self.delta0[val[1]].values())
             elif(val[0]=='t'):
                 obs_high_list[k] = self.T
 
@@ -203,8 +206,8 @@ class BlendEnv(gym.Env):
             "blenders": {b:0 for b in self.blenders},
             "demands": {p:0 for p in self.demands},
             'properties': {b: {q:0 for q in self.properties} for b in self.blenders},
-            "sources_avail":{s:{k:self.tau0[s][k] if k < len(self.tau0[s]) else 0 for k in range(self.window_len)} for s in self.sources},
-            "demands_avail":{p:{k:self.delta0[p][k] if k < len(self.delta0[p]) else 0 for k in range(self.window_len)}for p in self.demands}
+            "sources_avail":{s:{str(k):self.tau0[s][str(k)] if str(k) in self.tau0[s] else 0 for k in range(self.window_len)} for s in self.sources},
+            "demands_avail":{p:{str(k):self.delta0[p][str(k)] if str(k) in self.delta0[p] else 0 for k in range(self.window_len)}for p in self.demands}
         }    
         self.state["t"] = self.t
     
@@ -274,9 +277,9 @@ class BlendEnv(gym.Env):
         '''Function to santize action (scale) and its structure''' 
         for(i,j) in self.mapping_act:
             if(j[0]=='tau'):
-                self.action_high[i] = self.tau0[j[1]][self.t-1]
+                self.action_high[i] = self.tau0[j[1]][str(self.t-1)] if str(self.t-1) in self.tau0[j[1]] else 0
             if(j[0]=='delta'):
-                self.action_high[i] = self.delta0[j[1]][self.t-1]
+                self.action_high[i] = self.delta0[j[1]][str(self.t-1)] if str(self.t-1) in self.delta0[j[1]] else 0
         action_scaled = th.as_tensor(action_scaled, device=self._device)
         low_torch = th.as_tensor(self.action_low, dtype=action_scaled.dtype, device=self._device)
         high_torch = th.as_tensor(self.action_high, dtype=action_scaled.dtype, device=self._device)
@@ -311,7 +314,7 @@ class BlendEnv(gym.Env):
                 self.pens_step["Penalties/n_source bound violation:upper"]+=1
                 
                 if self.illegal_act_handling == "prop":
-                    action["tau"][s] = min(self.s_inv_ub[s] + outgoing - self.state["sources"][s],self.state["sources_avail"][s][0])
+                    action["tau"][s] = min(self.s_inv_ub[s] + outgoing - self.state["sources"][s],self.state["sources_avail"][s]["0"])
                 
                 elif self.illegal_act_handling == "disable": # Remove all outgoing flows
                     action["tau"][s] = 0
@@ -512,11 +515,11 @@ class BlendEnv(gym.Env):
         '''Function to update the future sources and demand available in the state'''
         for s in self.sources:
             for k in range(self.window_len):
-                self.state["sources_avail"][s][k] = self.tau0[s][k + self.t] if k + self.t < len(self.tau0[s]) else 0
+                self.state["sources_avail"][s][str(k)] = self.tau0[s][str(k + self.t)] if str(k + self.t) in self.tau0[s] else 0
         
         for p in self.demands:
             for k in range(self.window_len):
-                self.state["demands_avail"][p][k] = self.delta0[p][k + self.t] if k + self.t < len(self.delta0[p]) else 0
+                self.state["demands_avail"][p][str(k)] = self.delta0[p][str(k + self.t)] if str(k + self.t) in self.delta0[p] else 0
     def step(self, action_scaled: th.Tensor):
         action_scaled = action_scaled.clip(-1,1)
         self.t += 1
