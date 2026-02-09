@@ -40,7 +40,7 @@ Simply run the bash file requirements.sh. The file can be modified to change the
 ```bash
 bash requirements.sh
 ```
-Note: This repository uses a modified version of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
+Note: This repository uses a modified [version](https://github.com/li-group/omnisafe/tree/main) of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
 
 ## Environments
 
