@@ -40,6 +40,7 @@ def build_optimization_model(problem_data = problem_data):
         model.pow_flow = Var(transmission_lines, time_all)  # Reals by default
         model.bin_trans = Var(transmission_lines, time_all, domain=Binary)
         model.bin_trans_add = Var(transmission_lines, time_add, domain=Binary)
+        print(model.bin_trans_add)
     def init_numgen_rule(model, i,r):
         return model.num_gen[i,r,t_init] == num_gen_0[(i,r)]
     model.init_numgen = Constraint(generators,regions, rule=init_numgen_rule)
@@ -103,7 +104,7 @@ def build_optimization_model(problem_data = problem_data):
         trans_cost = -sum(
             model.bin_trans_add[l, t] * env_config["installcost"]["transmission"][l]
             for l in transmission_lines
-            for t in time_all
+            for t in time_add
         )
         return gen_cost + trans_cost
 
