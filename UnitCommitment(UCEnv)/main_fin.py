@@ -30,7 +30,7 @@ import os
 import numpy as np
 import omnisafe
 from omnisafe.envs.core import CMDP, env_register
-from Unit_Commitment_Safe import UnitCommitmentMasterEnvSafe
+from cmdp_env import UnitCommitmentMasterEnvSafe
 
 
 import ast
@@ -236,7 +236,7 @@ def recurse(eg, current, path=[], ):
 if __name__ == '__main__':
     debug_use = False
 
-    eg = ExperimentGrid(exp_name='Benchmark_Final_UC1')
+    eg = ExperimentGrid(exp_name='Benchmark_supp_UC1')
 
     if debug_use == True:
         base_policy = ['PPO']
@@ -244,17 +244,17 @@ if __name__ == '__main__':
         first_order_policy = ['P3O', 'OnCRPO']
         second_order_policy = ['CPO']
         off_policy = ['DDPGLag']
-        episodes_per_epoch = 3
+        episodes_per_epoch = 2
         steps_per_epoch = [24*episodes_per_epoch]
         total_steps = [24*episodes_per_epoch*2]
         num_episodes = 2
 
     else:
-        base_policy = []
-        naive_lagrange_policy = ['TRPOLag']
-        first_order_policy = ['P3O', 'OnCRPO']
-        second_order_policy = ['CPO']
-        off_policy = ['DDPGLag']
+        base_policy = ["SACLag", "SACPID", "FOCOPS"]
+        naive_lagrange_policy = []# ['TRPOLag']
+        first_order_policy = []# ['P3O', 'OnCRPO']
+        second_order_policy = []# ['CPO']
+        off_policy = []# ['DDPGLag']
         episodes_per_epoch = 100
         steps_per_epoch = [24 * episodes_per_epoch]
         total_steps = [24 * episodes_per_epoch * 500]

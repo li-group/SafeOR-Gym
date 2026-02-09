@@ -7,7 +7,7 @@ from typing import Any, ClassVar, List, Tuple, Optional, Dict, Union
 import torch
 import numpy as np
 
-from Unit_Commitment_Gym import UnitCommitmentMasterEnv
+from gym_env import UnitCommitmentMasterEnv
 
 import omnisafe
 from omnisafe.typing import OmnisafeSpace, DEVICE_CPU

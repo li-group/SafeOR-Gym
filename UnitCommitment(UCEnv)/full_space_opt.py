@@ -2,7 +2,7 @@ import numpy as np
 import pyomo.environ as pe
 
 
-def init_model(args, data):
+def build_optimization_model(args, data):
     num_gen = 5
     T = 24
     if args.env_id == 'UC-v0':
