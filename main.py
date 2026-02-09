@@ -29,7 +29,7 @@ from omnisafe.common.experiment_grid import ExperimentGrids
 
 
 def run_experiments(dir_name,env_id,environment_config_file_path,Steps_per_epoch,T,Total_epochs,output_activation_function = None):
-    import dir_name.cmdp_env
+    importlib.import_module(f"{dir_name}.cmdp_env")
     eg = ExperimentGrid(exp_name='Run')
     # Define algorithm categories
     base_policy = ['PolicyGradient', 'NaturalPG', 'TRPO', 'PPO']
