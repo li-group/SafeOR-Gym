@@ -25,7 +25,7 @@ import os
 import numpy as np
 import omnisafe
 
-from Blending_gym import BlendEnv
+from gym_env import BlendEnv
 @env_register
 class Blendenv_safe(CMDP):
     _support_envs = ['Blending-simple']
@@ -257,4 +257,5 @@ if __name__ == '__main__':
 
     
     
+
     
