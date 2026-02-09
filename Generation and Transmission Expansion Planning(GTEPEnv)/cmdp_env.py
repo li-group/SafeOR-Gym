@@ -25,7 +25,7 @@ import os
 import numpy as np
 import omnisafe
 
-from gen_transmission_exp_gym import Generator_transmission_expansion_env
+from gym_env import Generator_transmission_expansion_env
 @env_register
 class Generator_expansion_env_safe(CMDP):
     _support_envs = ['Capacity-Expansion']
@@ -194,4 +194,5 @@ if __name__ == '__main__':
     #eg.render(num_episodes=1, render_mode='rgb_array', width=256, height=256)
     a = eg.evaluate(num_episodes=10)
     
+
     
