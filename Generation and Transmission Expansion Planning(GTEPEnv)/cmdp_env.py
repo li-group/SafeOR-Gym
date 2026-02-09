@@ -25,20 +25,20 @@ import os
 import numpy as np
 import omnisafe
 
-from Blending_gym import BlendEnv
+from gym_env import Generator_transmission_expansion_env
 @env_register
-class Blendenv_safe(CMDP):
-    _support_envs = ['Blending-simple']
+class Generator_expansion_env_safe(CMDP):
+    _support_envs = ['Capacity-Expansion']
     need_auto_reset_wrapper = True  
     need_time_limit_wrapper = True  
     num_envs = 1
     def __init__(self, env_id: str,
                  **kwargs: Any) -> None:
         super().__init__(env_id)
-        #print(kwargs)
+        print(kwargs)
         self._device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         # Instantiate the environment object
-        self._env = BlendEnv(env_id=env_id, **kwargs.get('env_init_cfgs', {}))
+        self._env = Generator_transmission_expansion_env(env_id=env_id, **kwargs.get('env_init_cfgs', {}))
         # Specify the action space for initialization by the algorithm layer
         self._action_space = self._env.action_space
         # Specify the observation space for initialization by the algorithm layer
@@ -91,34 +91,6 @@ class Blendenv_safe(CMDP):
     def env_spec_log(self):
         return self._env.env_spec_log
 
-'''if __name__ == "__main__":
-    import omnisafe
-    ALGO = "CPO"
-    env_id = 'Capacity-Expansion'
-    env_config = {'env_init_cfgs':{
-    'T': 2,
-    'gencap': {"i1": 10},
-    'maxgen': {"i1":{ "r1": 1,"r2":1}},
-    'installcost': {"generators": {"i1": 10}},
-    'demand': {"r1":{"1": 10,"2":10},"r2":{"1": 10,"2":10}}}}
-    custom_cfgs = {
-        'train_cfgs': {
-            'total_steps': 60000,
-            },
-            'algo_cfgs': {
-                'steps_per_epoch': 1000,
-            'update_iters': 2,
-            },
-            'logger_cfgs': {'window_lens' : 500},
-            'env_cfgs': env_config,
-            'model_cfgs': {
-                'actor': {
-                    'hidden_sizes': [64, 64],
-                    'activation': 'relu',
-                    'output_activation': 'tanh'}}
-    }
-    agent = omnisafe.Agent(ALGO, env_id, custom_cfgs=custom_cfgs)
-    agent.learn()'''
 def recurse(eg,current, path=[],):
     if isinstance(current, dict):
         for k, v in current.items():
@@ -129,14 +101,15 @@ def recurse(eg,current, path=[],):
         eg.add(key, val)
 
 if __name__ == '__main__':
-    algos =  ['CPO','TRPOLag', 'P3O', 'OnCRPO', 'DDPGLag']
-    eg = ExperimentGrid(exp_name='Benchmark_Safety_simple_blend_fin_no')
+    
 
+    algos =  ['CPO','TRPOLag', 'P3O', 'OnCRPO', 'DDPGLag']
+    eg = ExperimentGrid(exp_name='Benchmark_Safety_simple_gen_exp_fin_2')
     mujoco_envs = [
-        'Blending-simple'
+        'Capacity-Expansion'
     ]
     eg.add('env_id', mujoco_envs)
-
+    num_steps_per_episode = 10
     # Set the device.
     avaliable_gpus = list(range(torch.cuda.device_count()))
     gpu_id = [0]
@@ -146,22 +119,24 @@ if __name__ == '__main__':
     if gpu_id and not set(gpu_id).issubset(avaliable_gpus):
         warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
         gpu_id = None
-    num_steps_per_episode = 6
     num_episodes_per_epoch = 100
     num_steps_per_epoch = num_episodes_per_epoch*num_steps_per_episode
-    total_epochs = 2000
+    total_epochs = 350
     total_steps = num_steps_per_epoch*total_epochs
+    
+    env_config = {'env_init_cfgs':{'config_file':'gen_config.json'}}
     #eg.add('algo',base_policy+naive_lagrange_policy+first_order_policy+second_order_policy+saute_policy+simmer_policy+primal_policy+off_policy)
     eg.add('algo',algos)
     eg.add('logger_cfgs:use_wandb', [False])
     eg.add('logger_cfgs:use_tensorboard', [True])
-
+    
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
-    env_config = {'env_init_cfgs':{'config_file':'Blending_no_config.json'}}
+   
     recurse(eg, env_config)
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
     eg.add('algo_cfgs:steps_per_epoch', [num_steps_per_epoch])
+    #eg.add('algo_cfgs:cost_limit', [25])
     eg.add('train_cfgs:total_steps', [total_steps])
     eg.add('logger_cfgs:window_lens', [int(num_episodes_per_epoch)])
     eg.add('seed', [0])
@@ -170,15 +145,14 @@ if __name__ == '__main__':
     # meanwhile, users should decide this value according to their machine
     eg.run(train, num_pool=1, gpu_id=gpu_id)
 
-
+    
     eg.analyze(parameter='algo', values=None, compare_num=5)
     #eg.render(num_episodes=1, render_mode='rgb_array', width=256, height=256)
     a = eg.evaluate(num_episodes=10)
-
-    eg = ExperimentGrid(exp_name='Benchmark_Safety_simple_blend_prop_fin')
-
+    
+    eg = ExperimentGrid(exp_name='Benchmark_Safety_simple_gen_trans_exp_fin_2')
     mujoco_envs = [
-        'Blending-simple'
+        'Capacity-Expansion'
     ]
     eg.add('env_id', mujoco_envs)
 
@@ -191,17 +165,22 @@ if __name__ == '__main__':
     if gpu_id and not set(gpu_id).issubset(avaliable_gpus):
         warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
         gpu_id = None
+    
+    total_steps = num_steps_per_epoch*total_epochs
+    
+    env_config = {'env_init_cfgs':{'config_file':'gen_trans_config.json'}}
     #eg.add('algo',base_policy+naive_lagrange_policy+first_order_policy+second_order_policy+saute_policy+simmer_policy+primal_policy+off_policy)
     eg.add('algo',algos)
     eg.add('logger_cfgs:use_wandb', [False])
     eg.add('logger_cfgs:use_tensorboard', [True])
-
+    
     eg.add('train_cfgs:vector_env_nums', [1])
     eg.add('train_cfgs:torch_threads', [1])
-    env_config = {'env_init_cfgs':{'config_file':'Blending_prop_config.json'}}
+   
     recurse(eg, env_config)
     eg.add('model_cfgs:actor:output_activation', ['tanh'])
     eg.add('algo_cfgs:steps_per_epoch', [num_steps_per_epoch])
+    #eg.add('algo_cfgs:cost_limit', [25])
     eg.add('train_cfgs:total_steps', [total_steps])
     eg.add('logger_cfgs:window_lens', [int(num_episodes_per_epoch)])
     eg.add('seed', [0])
@@ -210,51 +189,10 @@ if __name__ == '__main__':
     # meanwhile, users should decide this value according to their machine
     eg.run(train, num_pool=1, gpu_id=gpu_id)
 
-
+    
     eg.analyze(parameter='algo', values=None, compare_num=5)
     #eg.render(num_episodes=1, render_mode='rgb_array', width=256, height=256)
     a = eg.evaluate(num_episodes=10)
-
-    eg = ExperimentGrid(exp_name='Benchmark_Safety_simple_blend_disable_fin')
-
-    mujoco_envs = [
-        'Blending-simple'
-    ]
-    eg.add('env_id', mujoco_envs)
-
-    # Set the device.
-    avaliable_gpus = list(range(torch.cuda.device_count()))
-    gpu_id = [0]
-    # if you want to use CPU, please set gpu_id = None
-    # gpu_id = None
-
-    if gpu_id and not set(gpu_id).issubset(avaliable_gpus):
-        warnings.warn('The GPU ID is not available, use CPU instead.', stacklevel=1)
-        gpu_id = None
-    #eg.add('algo',base_policy+naive_lagrange_policy+first_order_policy+second_order_policy+saute_policy+simmer_policy+primal_policy+off_policy)
-    eg.add('algo',algos)
-    eg.add('logger_cfgs:use_wandb', [False])
-    eg.add('logger_cfgs:use_tensorboard', [True])
-
-    eg.add('train_cfgs:vector_env_nums', [1])
-    eg.add('train_cfgs:torch_threads', [1])
-    env_config = {'env_init_cfgs':{'config_file':'Blending_disable_config.json'}}
-    recurse(eg, env_config)
-    eg.add('model_cfgs:actor:output_activation', ['tanh'])
-    eg.add('algo_cfgs:steps_per_epoch', [num_steps_per_epoch])
-    eg.add('train_cfgs:total_steps', [total_steps])
-    eg.add('logger_cfgs:window_lens', [int(num_episodes_per_epoch)])
-    eg.add('seed', [0])
-    eg.add('train_cfgs:device', ['cuda:0'])
-    # total experiment num must can be divided by num_pool
-    # meanwhile, users should decide this value according to their machine
-    eg.run(train, num_pool=1, gpu_id=gpu_id)
-
-
-    eg.analyze(parameter='algo', values=None, compare_num=5)
-    #eg.render(num_episodes=1, render_mode='rgb_array', width=256, height=256)
-    a = eg.evaluate(num_episodes=10)
-
     
-    
+
     

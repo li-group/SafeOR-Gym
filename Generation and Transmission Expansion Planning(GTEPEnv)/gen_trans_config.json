@@ -1,6 +1,6 @@
 {
     "env_init_cfgs": {
-        "action_sample_file":"action_sample_base.json",
+        "action_sample_file":"data/action_sample_base.json",
         "T": 10,
         "gencap": {
             "i1": 15,

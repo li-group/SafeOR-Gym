@@ -36,49 +36,116 @@ alpha = 0
 beta = 0
 
 
-tau0   = {'s1': [10, 10, 10, 0, 0, 0],  's2': [30, 30, 30, 0, 0, 0]}
-delta0 = {'p1': [0, 0, 15, 15, 15, 15], 'p2': [0, 0, 15, 15, 15, 15]}
-sigma = {"s1":{"q1": 0.06,"q2":0.10}, "s2":{"q1": 0.26,"q2":0.5}} # Source concentrations
-sigma_ub = {"p1":{"q1": 0.16,"q2":0.8}, "p2":{"q1": 1,"q2":0.9}} # Demand concentrations UBs
-sigma_lb = {"p1":{"q1": 0,"q2":0}, "p2":{"q1": 0,"q2":0}}    # Demand concentrations LBs
+problem_data = {
+    "alpha": 0,
+    "beta": 0,
 
-s_inv_lb = {'s1': 0, 's2': 0}
-s_inv_ub = {'s1': 999, 's2': 999}
-d_inv_lb = {'p1': 0, 'p2': 0}
-d_inv_ub = {'p1': 999, 'p2': 999}
+    "tau0": {
+        "s1": [10, 10, 10, 0, 0, 0],
+        "s2": [30, 30, 30, 0, 0, 0],
+    },
 
-betaT_d = {'p1': 20, 'p2': 10} # Price of sold products
-betaT_s = {'s1': 0, 's2': 0} # Cost of bought products
+    "delta0": {
+        "p1": [0, 0, 15, 15, 15, 15],
+        "p2": [0, 0, 15, 15, 15, 15],
+    },
 
-b_inv_ub = {"j1": 30, "j2": 30, "j3": 30, "j4": 30}
-b_inv_lb = {j:0 for j in b_inv_ub.keys()} 
+    "sigma": {
+        "s1": {"q1": 0.06, "q2": 0.10},
+        "s2": {"q1": 0.26, "q2": 0.50},
+    },
 
-window_len = 2
-T = 6
+    "sigma_ub": {
+        "p1": {"q1": 0.16, "q2": 0.8},
+        "p2": {"q1": 1.0, "q2": 0.9},
+    },
 
-properties = ["q1","q2"]
+    "sigma_lb": {
+        "p1": {"q1": 0.0, "q2": 0.0},
+        "p2": {"q1": 0.0, "q2": 0.0},
+    },
 
+    "s_inv_lb": {
+        "s1": 0,
+        "s2": 0,
+    },
 
+    "s_inv_ub": {
+        "s1": 999,
+        "s2": 999,
+    },
 
-def solve(tau0 = tau0, delta0 = delta0,
-        alpha = alpha,
-        beta = beta,
-        properties = properties,
-        T = T,
-        sigma = sigma,
-        sigma_ub = sigma_ub,
-        sigma_lb = sigma_lb,
-        s_inv_ub = s_inv_ub,
-        d_inv_ub = d_inv_ub,
-        betaT_d = betaT_d,
-        betaT_s = betaT_s,
-        b_inv_ub = b_inv_ub,
-       ):
+    "d_inv_lb": {
+        "p1": 0,
+        "p2": 0,
+    },
+
+    "d_inv_ub": {
+        "p1": 999,
+        "p2": 999,
+    },
+
+    "betaT_d": {
+        "p1": 20,
+        "p2": 10,
+    },
+
+    "betaT_s": {
+        "s1": 0,
+        "s2": 0,
+    },
+
+    "b_inv_ub": {
+        "j1": 30,
+        "j2": 30,
+        "j3": 30,
+        "j4": 30,
+    },
+
+    "b_inv_lb": {
+        "j1": 0,
+        "j2": 0,
+        "j3": 0,
+        "j4": 0,
+    },
+
+    "window_len": 2,
+    "T": 6,
+
+    "properties": ["q1", "q2"],
+    "action_sample_file": "./data/action_sample_simple_blend.json",
+    "connections_file": "./data/connections_simple_blend.json" 
     
-    with open("./action_sample_simple_blend.json" ,"r") as f:
+}
+
+
+
+
+def build_optimization_model(problem_data = problem_data):
+
+    alpha      = problem_data["alpha"]
+    beta       = problem_data["beta"]
+    tau0       = problem_data["tau0"]
+    delta0     = problem_data["delta0"]
+    sigma      = problem_data["sigma"]
+    sigma_ub   = problem_data["sigma_ub"]
+    sigma_lb   = problem_data["sigma_lb"]
+    s_inv_lb   = problem_data["s_inv_lb"]
+    s_inv_ub   = problem_data["s_inv_ub"]
+    d_inv_lb   = problem_data["d_inv_lb"]
+    d_inv_ub   = problem_data["d_inv_ub"]
+    betaT_d    = problem_data["betaT_d"]
+    betaT_s    = problem_data["betaT_s"]
+    b_inv_ub   = problem_data["b_inv_ub"]
+    b_inv_lb   = problem_data["b_inv_lb"]
+    T          = problem_data["T"]
+    window_len = problem_data["window_len"]
+    properties = problem_data["properties"]
+    
+    with open(problem_data["action_sample_file"] ,"r") as f:
         action = f.read()
     action_sample = json.loads(action)
-    with open("./connections_simple_blend.json" ,"r") as f:
+    with open(problem_data["connections_file"] ,"r") as f:
         connections_s = f.readline()
     connections = json.loads(connections_s)
     sources, blenders, demands = get_sbp(connections)
@@ -267,48 +334,7 @@ def solve(tau0 = tau0, delta0 = delta0,
             for t in model.timestamps_act) for j in model.blenders)
 
     model.obj = Objective(rule=obj_function, sense=maximize)
-    # Solve the model
-    solver = SolverFactory('gurobi')
-    result1 = solver.solve(model, tee=True)
-    print(model.obj())
-    blenders.sort()
-    print(blenders)
-    actions = {}
-    for t in timestamps_act:
-        action = {}
-        action["source_blend"] = {}
-        for s in sources:
-            action["source_blend"][s] = {}
-            for j in blenders:
-                if j not in connections["source_blend"][s]:
-                    action["source_blend"][s][j] = {}
-                else:
-                    action["source_blend"][s][j] = model.source_blend_flow[s, j, t].value
-        action["blend_blend"] = {}
-        for j1 in blenders:
-            action["blend_blend"][j1] = {}
-            for j2 in blenders:
-                if j2 not in connections["blend_blend"][j1]:
-                    action["blend_blend"][j1][j2] = {}
-                else:
-                    action["blend_blend"][j1][j2] = model.blend_blend_flow[j1,j2,t].value
-        action["blend_demand"] = {}
-        for j in blenders:
-            action["blend_demand"][j] = {}
-            for p in demands:
-                if p not in connections["blend_demand"][j]:
-                    action["blend_demand"][j][p] = {}
-                else:
-                    action["blend_demand"][j][p] = model.blend_demand_flow[j,p,t].value
-        action["tau"] = {}
-        for s in sources:
-            action["tau"][s] = model.offer_bought[s,t].value
-        action["delta"] = {}
-        for p in demands:
-            action["delta"][p] = model.demand_sold[p,t].value
-        actions[t] = action
-    print(properties)
-    return actions
-    
-actions = solve()
-print(actions)
+    return model
+
+
+

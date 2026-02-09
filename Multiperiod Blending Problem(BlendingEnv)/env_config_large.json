@@ -341,7 +341,9 @@
             "j16": 0
         },
         "window_len": 2,
-        "action_sample_file": "./action_sample_simple_blend_large.json",
-        "connections_file": "./connections_simple_blend_large.json"
+        "action_sample_file": "./data/action_sample_simple_blend_large.json",
+        "connections_file": "./data/connections_simple_blend_large.json"
     }
 }
+
+
