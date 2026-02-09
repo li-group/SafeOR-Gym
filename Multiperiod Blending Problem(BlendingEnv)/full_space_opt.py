@@ -113,6 +113,9 @@ problem_data = {
     "T": 6,
 
     "properties": ["q1", "q2"],
+    "action_sample_file": "./data/action_sample_simple_blend.json",
+    "connections_file": "./data/connections_simple_blend.json" 
+    
 }
 
 
@@ -139,10 +142,10 @@ def build_optimization_model(problem_data = problem_data):
     window_len = problem_data["window_len"]
     properties = problem_data["properties"]
     
-    with open("./data/action_sample_simple_blend.json" ,"r") as f:
+    with open(problem_data["action_sample_file"] ,"r") as f:
         action = f.read()
     action_sample = json.loads(action)
-    with open("./data/connections_simple_blend.json" ,"r") as f:
+    with open(problem_data["connections_file"] ,"r") as f:
         connections_s = f.readline()
     connections = json.loads(connections_s)
     sources, blenders, demands = get_sbp(connections)
@@ -332,5 +335,6 @@ def build_optimization_model(problem_data = problem_data):
 
     model.obj = Objective(rule=obj_function, sense=maximize)
     return model
+
 
 
