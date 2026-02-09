@@ -75,10 +75,10 @@ def solve(tau0 = tau0, delta0 = delta0,
         b_inv_ub = b_inv_ub,
        ):
     
-    with open("./action_sample_simple_blend.json" ,"r") as f:
+    with open("./data/action_sample_simple_blend.json" ,"r") as f:
         action = f.read()
     action_sample = json.loads(action)
-    with open("./connections_simple_blend.json" ,"r") as f:
+    with open("./data/connections_simple_blend.json" ,"r") as f:
         connections_s = f.readline()
     connections = json.loads(connections_s)
     sources, blenders, demands = get_sbp(connections)
@@ -312,3 +312,4 @@ def solve(tau0 = tau0, delta0 = delta0,
     
 actions = solve()
 print(actions)
+
