@@ -165,13 +165,10 @@ cython_debug/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
 
 # PyPI configuration file
 .pypirc
-/UnitCommitment/runs/
-/UnitCommitment/exp-x/
-UnitCommitment/algo---UC-v0---e9ff1503d983fdaa971bb1f71317e524c2a63c2c46228644faa3df1c3038cb31.png
-UnitCommitment/algo---UC-v1---eeff9c7a65c663beafb83b6713d701b09a8ad799a8f38ad70b5ec0f0bf4e8fdb.png
-UnitCommitment/set_up_hao.py
-/UnitCommitment/results/
+
+# .DS_Store
+.DS_Store
