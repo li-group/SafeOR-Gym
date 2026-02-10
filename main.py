@@ -7,6 +7,8 @@ import logging
 import warnings
 import argparse
 import importlib
+import importlib.util
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import numpy as np
@@ -28,9 +30,12 @@ from omnisafe.utils.config import Config
 from omnisafe.utils.exp_grid_tools import train
 from omnisafe.common.experiment_grid import ExperimentGrid
 
+module = importlib.import_module("Resource Task Network.cmdp_env")
+SafeRTN = module.SafeRTN
 
 def run_experiments(args):
-    importlib.import_module(f"{args.dir_name}.cmdp_env")
+    # importlib.import_module(f"{args.dir_name}")
+
     eg = ExperimentGrid(exp_name='Run')
 
     # Define algorithm categories
@@ -42,7 +47,9 @@ def run_experiments(args):
     offline_policy = ['DDPGLag']
 
     # Target environment
-    eg.add('env_id', args.env_id)
+    eg.add('env_id', [args.env_id])
+
+    print(dir(eg))
 
     # GPU configuration
     available_gpus = list(range(torch.cuda.device_count()))
@@ -84,7 +91,7 @@ def run_experiments(args):
     eg.add('algo_cfgs:steps_per_epoch', [args.steps_per_epoch])
 
     # Environment config file and parameters
-    eg.add('env_cfgs:env_init_config:config_file', [args.environment_config_file_path])
+    eg.add('env_cfgs:env_init_config:config_file', [os.path.join(args.dir_name, args.environment_config_file_path)])
 
     # Run training, analysis, and evaluation
     eg.run(train, num_pool=args.num_pool, gpu_id=gpu_id)
