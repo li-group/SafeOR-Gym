@@ -6,6 +6,7 @@ from typing import Any, ClassVar, List, Tuple, Optional, Dict
 
 import torch
 import numpy as np
+import json
 
 import gymnasium as gym
 from gymnasium.spaces.utils import flatten_space
@@ -85,6 +86,58 @@ class UnitCommitmentMasterEnv(gym.Env):
     r: reserve of ith generator at time t
     pi: angle of bus n at time t
     """
+
+    _CONFIG_SCHEMA = {
+        "penalty_factor_UT": float,
+        "penalty_factor_DT": float,
+        "penalty_factor_RampUp": float,
+        "penalty_factor_RampDown": float,
+        "penalty_factor_fmin": float,
+        "penalty_factor_fmax": float,
+        "T": int,
+        "num_gen": int,
+        "num_bus": int,
+        "num_line": int,
+        "gen_bus": dict,
+        "bus_gen": dict,
+        "line_bus": dict,
+        "B": np.ndarray,
+        "F_max": np.ndarray,
+        "F_min": np.ndarray,
+        "Pi_max": np.ndarray,
+        "Pi_min": np.ndarray,
+        "pi0": np.ndarray,
+        "loc": np.ndarray,
+        "scale": np.ndarray,
+        "deterministic_demand": np.ndarray,
+        "model_type": str,
+        "forecast_length": int,
+        "P_max": np.ndarray,
+        "P_min": np.ndarray,
+        "a": np.ndarray,
+        "b": np.ndarray,
+        "c": np.ndarray,
+        "UT": np.ndarray,
+        "DT": np.ndarray,
+        "RU": np.ndarray,
+        "RD": np.ndarray,
+        "SU": np.ndarray,
+        "SD": np.ndarray,
+        "hot_cost": np.ndarray,
+        "cold_cost": np.ndarray,
+        "cold_hrs": np.ndarray,
+        "C_SD": np.ndarray,
+        "C_LS": float,
+        "C_RP": float,
+        "R": float,
+        "scale_action": bool,
+        "no_change_before_0": bool,
+        "u0_seq": dict,
+        "u0_prev": np.ndarray,
+        "u0": np.ndarray,
+        "p0_prev": np.ndarray,
+        "p0": np.ndarray,
+    }
 
     def __init__(self, env_id: str,
                  **kwargs: Any) -> None:
@@ -225,7 +278,12 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.p_prev = self.p0_prev = np.array([300, 0, 0, 0, 0])
         self.p = self.p0 = np.array([300, 0, 0, 0, 0])
 
+        config_path = kwargs.pop('config_path', None)
+        if config_path is not None:
+            self.env_config = self.load_config(config_path, env_id=self.env_id)
+
         assign_env_config(self, kwargs)
+        self._rebuild_indices()
 
         # initialize belief model/data
         self.D_forecast = np.zeros((self.forecast_length, self.num_bus))
@@ -367,6 +425,22 @@ class UnitCommitmentMasterEnv(gym.Env):
         self.D_forecast = self._forecast_demand()
 
         return self._get_state(), {}
+
+    def _rebuild_indices(self) -> None:
+        self._max_episode_steps = self.T
+        self.generators = range(self.num_gen)
+        self.buses = range(self.num_bus)
+        self.lines = range(self.num_line)
+        self.from_bus = []
+        self.to_bus = []
+        for line in self.lines:
+            self.from_bus.append(self.line_bus[line][0])
+            self.to_bus.append(self.line_bus[line][1])
+        self.from_bus_lines = {i: [] for i in self.buses}
+        self.to_bus_lines = {i: [] for i in self.buses}
+        for line, (from_bus, to_bus) in self.line_bus.items():
+            self.from_bus_lines[from_bus].append(line)
+            self.to_bus_lines[to_bus].append(line)
 
     @staticmethod
     def _vectorize_seq(seq: Dict[int, np.ndarray]) -> np.ndarray:
@@ -656,6 +730,61 @@ class UnitCommitmentMasterEnv(gym.Env):
     def close(self) -> None:
         return None
 
+    def load_config(self, path: str, env_id: str) -> dict:
+        with open(path, 'r') as f:
+            cfg = json.load(f)
+
+        base_cfg = cfg.get('common', {})
+        if env_id in cfg:
+            env_cfg = cfg[env_id]
+        elif 'common' in cfg:
+            raise ValueError(f"Config missing section for env_id '{env_id}'")
+        else:
+            env_cfg = cfg
+
+        merged = {**base_cfg, **env_cfg}
+
+        def _int_keyed_dict(d):
+            return {int(k): v for k, v in d.items()}
+
+        if 'gen_bus' in merged:
+            merged['gen_bus'] = _int_keyed_dict(merged['gen_bus'])
+        if 'bus_gen' in merged:
+            merged['bus_gen'] = {int(k): v for k, v in merged['bus_gen'].items()}
+        if 'line_bus' in merged:
+            merged['line_bus'] = {int(k): tuple(v) for k, v in merged['line_bus'].items()}
+        if 'u0_seq' in merged:
+            merged['u0_seq'] = {int(k): np.array(v, dtype=float) for k, v in merged['u0_seq'].items()}
+
+        float_array_keys = {
+            'B', 'F_max', 'F_min', 'Pi_max', 'Pi_min', 'pi0', 'loc', 'scale',
+            'deterministic_demand', 'P_max', 'P_min', 'a', 'b', 'c', 'RU', 'RD',
+            'SU', 'SD', 'hot_cost', 'cold_cost', 'C_SD', 'u0_prev', 'u0',
+            'p0_prev', 'p0'
+        }
+        int_array_keys = {'UT', 'DT', 'cold_hrs'}
+
+        for key in float_array_keys:
+            if key in merged:
+                merged[key] = np.array(merged[key], dtype=float)
+        for key in int_array_keys:
+            if key in merged:
+                merged[key] = np.array(merged[key], dtype=int)
+
+        for key in [
+            'penalty_factor_UT', 'penalty_factor_DT', 'penalty_factor_RampUp',
+            'penalty_factor_RampDown', 'penalty_factor_fmin', 'penalty_factor_fmax',
+            'C_LS', 'C_RP', 'R'
+        ]:
+            if key in merged:
+                merged[key] = float(merged[key])
+
+        for key in ['T', 'num_gen', 'num_bus', 'num_line', 'forecast_length']:
+            if key in merged:
+                merged[key] = int(merged[key])
+
+        return merged
+
     def set_seed(self, seed: int) -> None:
         random.seed(seed)
         np.random.seed(seed)
@@ -693,10 +822,19 @@ def assign_env_config(self, kwargs):
         setattr(self, key, value)
     if hasattr(self, 'env_config'):
         for key, value in self.env_config.items():
+            if hasattr(self, '_CONFIG_SCHEMA'):
+                if key not in self._CONFIG_SCHEMA:
+                    raise AttributeError(f"{self} has no config attribute, {key}")
+                expected_type = self._CONFIG_SCHEMA[key]
+                if not isinstance(value, expected_type):
+                    raise TypeError(
+                        f"Config '{key}' expects type {expected_type.__name__}, "
+                        f"got {type(value).__name__}"
+                    )
             # Check types based on default settings
             if hasattr(self, key):
-                if type(getattr(self,key)) == np.ndarray:
-                    setattr(self, key, value)
+                if isinstance(getattr(self, key), np.ndarray):
+                    setattr(self, key, value if isinstance(value, np.ndarray) else np.array(value))
                 else:
                     setattr(self, key,
                         type(getattr(self, key))(value))

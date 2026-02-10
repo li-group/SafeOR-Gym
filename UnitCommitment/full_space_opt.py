@@ -1,53 +1,73 @@
 import numpy as np
 import pyomo.environ as pe
+import json
+import os
 
 
-def build_optimization_model(args, data):
-    num_gen = 5
-    T = 24
-    if args.env_id == 'UC-v0':
-        num_bus = 1
-        gen_bus = {i: 0 for i in range(num_gen)}
-        bus_gen = {0: [0, 1, 2, 3, 4]}
-        num_line = 0
-        line_bus = {}
-        B = np.array([20])
-        F_max = np.array([0])
-        F_min = np.array([0])
-        Pi_max = np.array([0])
-        Pi_min = np.array([0])
-        pi0 = np.array([0])
-        deterministic_demand = np.array([[362.], [191.], [303.], [263.], [416.], [302.],
-                                              [328.], [234.], [357.], [266.], [333.], [325.],
-                                              [343.], [285.], [290.], [329.], [245.], [305.],
-                                              [311.], [254.], [385.], [214.], [197.], [227.]])
-    elif args.env_id == 'UC-v1':
-        num_bus = 4
-        gen_bus = {0: 0, 1: 1, 2: 2, 3: 3, 4: 3}
-        bus_gen = {0: [0], 1: [1], 2: [2], 3: [3, 4]}
-        num_line = 5
-        line_bus = {0: (0, 1), 1: (0, 2), 2: (1, 2), 3: (1, 3), 4: (2, 3)}
-        B = np.array([20, 20, 20, 20, 20])
-        F_max = np.array([100, 100, 100, 100, 100])
-        F_min = np.array([-100, -100, -100, -100, -100])
-        Pi_max = np.array([0, 0.2, 0.2, 0.2])  # angle_1 = 0
-        Pi_min = np.array([0, -0.2, -0.2, -0.2])  # angle_1 = 0
-        pi0 = np.array([0, 0, 0, 0])
-        deterministic_demand = np.array([[226., 57., 52., 59.], [233., 57., 65., 77.],
-                                              [258., 59., 48., 78.], [272., 67., 55., 67.],
-                                              [247., 55., 65., 65.], [232., 65., 69., 63.],
-                                              [213., 57., 59., 69.], [245., 71., 60., 74.],
-                                              [243., 59., 72., 61.], [263., 63., 55., 56.],
-                                              [291., 60., 55., 72.], [235., 58., 59., 73.],
-                                              [234., 59., 67., 65.], [253., 47., 54., 63.],
-                                              [267., 52., 47., 55.], [223., 58., 57., 72.],
-                                              [239., 67., 62., 67.], [260., 60., 56., 63.],
-                                              [234., 61., 62., 76.], [241., 59., 54., 84.],
-                                              [298., 63., 63., 76.], [235., 55., 52., 80.],
-                                              [273., 63., 75., 80.], [276., 54., 73., 70.]])
+def build_optimization_model(args):
 
+    config_path = getattr(args, 'config_path', None)
+    if config_path is None:
+        config_path = os.path.join(os.path.dirname(__file__), 'unit_commitment_config.json')
+
+    with open(config_path, 'r') as f:
+        cfg = json.load(f)
+
+    base_cfg = cfg.get('common', {})
+    if args.env_id in cfg:
+        env_cfg = cfg[args.env_id]
+    elif 'common' in cfg:
+        raise ValueError(f"Config missing section for env_id '{args.env_id}'")
     else:
-        raise ValueError(f"Unknown env_id: {args.env_id}")
+        env_cfg = cfg
+
+    cfg = {**base_cfg, **env_cfg}
+
+    def _int_keyed_dict(d):
+        return {int(k): v for k, v in d.items()}
+
+    if 'gen_bus' in cfg:
+        cfg['gen_bus'] = _int_keyed_dict(cfg['gen_bus'])
+    if 'bus_gen' in cfg:
+        cfg['bus_gen'] = {int(k): v for k, v in cfg['bus_gen'].items()}
+    if 'line_bus' in cfg:
+        cfg['line_bus'] = {int(k): tuple(v) for k, v in cfg['line_bus'].items()}
+    if 'u0_seq' in cfg:
+        cfg['u0_seq'] = {int(k): np.array(v, dtype=float) for k, v in cfg['u0_seq'].items()}
+
+    float_array_keys = {
+        'B', 'F_max', 'F_min', 'Pi_max', 'Pi_min', 'pi0', 'loc', 'scale',
+        'deterministic_demand', 'P_max', 'P_min', 'a', 'b', 'c', 'RU', 'RD',
+        'SU', 'SD', 'hot_cost', 'cold_cost', 'C_SD', 'u0_prev', 'u0',
+        'p0_prev', 'p0'
+    }
+    int_array_keys = {'UT', 'DT', 'cold_hrs'}
+
+    for key in float_array_keys:
+        if key in cfg:
+            cfg[key] = np.array(cfg[key], dtype=float)
+    for key in int_array_keys:
+        if key in cfg:
+            cfg[key] = np.array(cfg[key], dtype=int)
+
+    for key in ['T', 'num_gen', 'num_bus', 'num_line']:
+        if key in cfg:
+            cfg[key] = int(cfg[key])
+
+    num_gen = cfg['num_gen']
+    T = cfg['T']
+    num_bus = cfg['num_bus']
+    gen_bus = cfg['gen_bus']
+    bus_gen = cfg['bus_gen']
+    num_line = cfg['num_line']
+    line_bus = cfg['line_bus']
+    B = cfg['B']
+    F_max = cfg['F_max']
+    F_min = cfg['F_min']
+    Pi_max = cfg['Pi_max']
+    Pi_min = cfg['Pi_min']
+    pi0 = cfg['pi0']
+    deterministic_demand = cfg['deterministic_demand']
 
     horizon = range(1, T + 1)
     generators = range(num_gen)
@@ -70,30 +90,26 @@ def build_optimization_model(args, data):
         from_bus_lines[from_bus].append(line)
         to_bus_lines[to_bus].append(line)
 
-    P_max = np.array([455, 130, 130, 80, 55])
-    P_min = np.array([150, 20, 20, 20, 55])
-    a = np.array([0.00048, 0.00200, 0.00211, 0.00712, 0.00413])
-    b = np.array([16.19, 16.60, 16.50, 22.26, 25.92])
-    c = np.array([1000, 700, 680, 370, 660])
-    UT = np.array([8, 5, 5, 3, 1])
-    DT = np.array([8, 5, 5, 3, 1])
-    RU = np.array([300, 85, 85, 55, 55])
-    RD = np.array([300, 85, 85, 55, 55])
-    SU = np.array([300, 85, 85, 55, 55])
-    SD = np.array([300, 85, 85, 55, 55])
-    hot_cost = np.array([4500, 550, 560, 170, 30])
-    cold_cost = np.array([9000, 1100, 1120, 340, 60])
-    cold_hrs = np.array([5, 4, 4, 2, 0])
-    C_SD = np.array([0, 0, 0, 0, 0])
-    C_LS = 100
-    C_RP = 100
-    R = 10
+    P_max = cfg['P_max']
+    P_min = cfg['P_min']
+    a = cfg['a']
+    b = cfg['b']
+    c = cfg['c']
+    UT = cfg['UT']
+    DT = cfg['DT']
+    RU = cfg['RU']
+    RD = cfg['RD']
+    SU = cfg['SU']
+    SD = cfg['SD']
+    hot_cost = cfg['hot_cost']
+    cold_cost = cfg['cold_cost']
+    cold_hrs = cfg['cold_hrs']
+    C_SD = cfg['C_SD']
+    C_LS = cfg['C_LS']
+    C_RP = cfg['C_RP']
+    R = cfg['R']
 
-    u0_seq = {0: np.ones(8 + 1),  # assume only 1st generator is on
-              1: np.zeros(5 + 1),
-              2: np.zeros(5 + 1),
-              3: np.zeros(3 + 1),
-              4: np.zeros(1 + 1)}  # assume no change happened from - [max(UT, DT)+1] to 0
+    u0_seq = cfg['u0_seq']
     v0_seq = {}
     w0_seq = {}
     for i in generators:
@@ -111,8 +127,8 @@ def build_optimization_model(args, data):
         for t in range(DT[i]):
             w_prev.update({(-t, i): w0_seq[i][t]})
 
-    u0 = np.array([1, 0, 0, 0, 0])
-    p0 = np.array([300, 0, 0, 0, 0])
+    u0 = cfg['u0']
+    p0 = cfg['p0']
 
     model = pe.ConcreteModel()
     model.T_set = pe.Set(initialize=horizon)
@@ -307,8 +323,6 @@ def build_optimization_model(args, data):
 
     model.obj = pe.Objective(expr=sum(model.total_cost[t] for t in model.T_set), sense=pe.minimize)
     return model
-
-
 
 
 
