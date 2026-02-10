@@ -8,7 +8,6 @@ import pickle
 import logging
 import random
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
-from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -16,11 +15,11 @@ import torch
 from omnisafe.envs.core import CMDP, env_register
 from omnisafe.common.logger import Logger
 
-from gym_env import RTNEnv
+from gym_env import STNEnv
 
 @env_register
-class SafeRTN(CMDP):
-    _support_envs: ClassVar[List[str]] = ['rtn-v0']
+class SafeSTN(CMDP):
+    _support_envs: ClassVar[List[str]] = ['stn-v0']
     need_auto_reset_wrapper = True
     need_time_limit_wrapper = True
     _num_envs = 1
@@ -30,7 +29,7 @@ class SafeRTN(CMDP):
         
         self._device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         # Instantiate the environment object
-        self._env = RTNEnv(env_id = env_id, **kwargs.get('env_init_config', {}))
+        self._env = STNEnv(env_id = env_id, **kwargs.get('env_init_config', {}))
         # Specify the action space for initialization by the algorithm layer
         self._action_space = self._env.action_space
         # Specify the observation space for initialization by the algorithm layer
