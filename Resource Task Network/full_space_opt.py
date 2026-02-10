@@ -171,9 +171,8 @@ def build_rtn_model(config_file: str, horizon: int):
             m.SalesCap.add( m.Ss[p,t] <= prod_capacity )
 
 
-    return m, R_dict, P_dict, IM_dict, J_dict
+    return m#, R_dict, P_dict, IM_dict, J_dict
 
-model, R_dict, P_dict, IM_dict, J_dict = build_rtn_model("hard_environment_data.json", horizon = 30)
-#model.pprint()
+model = build_rtn_model("hard_environment_data.json", horizon = 30)
 solver = po.SolverFactory('gurobi')
 results = solver.solve(model, tee = True)

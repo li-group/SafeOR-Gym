@@ -1,7 +1,7 @@
 import json
 import pyomo.environ as po
 
-def build_stn_model(config_file: str, horizon: int) -> po.ConcreteModel:
+def build_optimization_model(config_file: str, horizon: int) -> po.ConcreteModel:
     # 1) LOAD JSON
     with open(config_file, 'r') as f:
         data = json.load(f)
@@ -185,17 +185,9 @@ def build_stn_model(config_file: str, horizon: int) -> po.ConcreteModel:
             m.SalesCap.add(m.Ss[p,t] <= cap)
 
     
-    return m, R_dict, P_dict, IM_dict, J_dict
+    return m #, R_dict, P_dict, IM_dict, J_dict
 
 
-model, R_dict, P_dict, IM_dict, J_dict = build_stn_model("hard_environment_data.json", horizon = 30)
-#model.pprint()
+model = build_optimization_model("hard_environment_data.json", horizon = 30)
 solver = po.SolverFactory('gurobi')
 results = solver.solve(model, tee = True)
-
-rev   = sum(po.value(model.Ss[p,t]) * po.value(model.Price[p]) for p in P_dict for t in model.T)
-pen   = 1.5 * sum(po.value(model.Sl[p,t]) * po.value(model.Price[p]) for p in P_dict for t in model.T)
-util  = sum(po.value(model.F[u,t]) for u in model.U for t in model.T)
-slack = sum(po.value(model.Sl[r,t]) * po.value(model.Cost[r]) for r in model.P for t in model.T)
-
-print(f'Revenue : {rev}, util : {util}, pen : {pen}, slack : {slack}')

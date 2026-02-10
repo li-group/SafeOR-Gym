@@ -16,22 +16,30 @@ class BaseMILPSolver:
     
     '''
 
-    def __init__(self, env, solve_horizon : int = 1):
+    def __init__(self, env, solve_horizon : int = 1, solver_verbose : bool = False):
         self.env = env
         self.solve_horizon = solve_horizon
+        self.solver_verbose = solver_verbose
 
-    def get_action(self, observation : Union[Dict[str, Any], np.ndarray]) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+    def get_action(self, state : Union[Dict[str, Any], np.ndarray]) -> Union[np.ndarray, Dict[str, np.ndarray]]:
         '''
         Returns the action based on the solution of the MILP algorithm
 
         '''
-        raise NotImplementedError
+        return _solve_one_horizon(self, state)
+    
+    def get_actions(self, state : Union[Dict[str, Any], np.ndarray]) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+        '''
+        Returns the action based on the solution of the MILP algorithm
 
+        '''
+        return _solve_full_horizon(self, state)
+    
     def reset(self) -> None:
         '''
         Resets the algorithm
         '''
-        pass
+        
 
 class RandomAlgorithm(BaseMILPSolver):
     '''
