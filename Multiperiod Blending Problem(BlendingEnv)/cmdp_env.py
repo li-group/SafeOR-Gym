@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
+
 import warnings
 import torch
 from omnisafe.common.experiment_grid import ExperimentGrid
@@ -52,7 +56,7 @@ class Blendenv_safe(CMDP):
             torch.as_tensor(obs, dtype=torch.float32, device=self._device),
             info,
         )
-    def step(self, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
+    def step(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
                                                     dict]:
         # Read the dynamic information after interacting with the environment
         obs, neg_reward_minus_pos_cost, terminated, truncated, info = self._env.step(
