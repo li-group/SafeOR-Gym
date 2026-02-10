@@ -142,8 +142,8 @@ class BlendEnv(gym.Env):
         
         self.window_len = 2
         self.T = 6
-        self.action_sample_file = "./data/action_sample_simple_blend.json"
-        self.connections_file = "./data/connections_simple_blend.json"
+        self.action_sample_file = "Multiperiod Blending Problem(BlendingEnv)/data/action_sample_simple_blend.json"
+        self.connections_file = "Multiperiod Blending Problem(BlendingEnv)/data/connections_simple_blend.json"
         
         self.config_file = kwargs.get('config_file', '')
         try:
@@ -569,6 +569,7 @@ class BlendEnv(gym.Env):
 
     def set_seed(self, seed: int) -> None:
         random.seed(seed)
+
 
 
 
