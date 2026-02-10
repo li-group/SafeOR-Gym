@@ -234,16 +234,16 @@ def recurse(eg, current, path=[], ):
 
 
 if __name__ == '__main__':
-    debug_use = False
+    debug_use = True
 
     eg = ExperimentGrid(exp_name='Benchmark_supp_UC1')
 
     if debug_use == True:
         base_policy = ['PPO']
         naive_lagrange_policy = ['TRPOLag']
-        first_order_policy = ['P3O', 'OnCRPO']
-        second_order_policy = ['CPO']
-        off_policy = ['DDPGLag']
+        first_order_policy = [] # ['P3O', 'OnCRPO']
+        second_order_policy = [] # ['CPO']
+        off_policy = [] #['DDPGLag']
         episodes_per_epoch = 2
         steps_per_epoch = [24*episodes_per_epoch]
         total_steps = [24*episodes_per_epoch*2]
@@ -270,6 +270,10 @@ if __name__ == '__main__':
         'UC-v0', 'UC-v1'
     ]
     eg.add('env_id', mujoco_envs)
+
+    eg.add(
+    'env_cfgs:env_init_config:config_path',
+    ['unit_commitment_config.json'])
 
     # Set the device.
     available_gpus = list(range(torch.cuda.device_count()))
