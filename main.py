@@ -7,8 +7,6 @@ import logging
 import warnings
 import argparse
 import importlib
-import importlib.util
-
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import numpy as np
@@ -16,7 +14,7 @@ from typing import Any, ClassVar, List, Tuple, Optional, Dict
 
 import torch
 import torch.nn as nn
-import pyomo.environ as po
+#import pyomo.environ as po
 
 import gymnasium as gym
 from gymnasium.spaces.utils import flatten_space
@@ -29,13 +27,18 @@ from omnisafe import Agent
 from omnisafe.utils.config import Config
 from omnisafe.utils.exp_grid_tools import train
 from omnisafe.common.experiment_grid import ExperimentGrid
+import os
+import importlib
 
-module = importlib.import_module("Resource Task Network.cmdp_env")
-SafeRTN = module.SafeRTN
+_env_mod = os.environ.get("OMNISAFE_ENV_MODULE")
+if _env_mod:
+    importlib.import_module(_env_mod)  # triggers registration
+
 
 def run_experiments(args):
-    # importlib.import_module(f"{args.dir_name}")
-
+    #importlib.import_module(f"{args.dir_name}.cmdp_env")
+    os.environ["OMNISAFE_ENV_MODULE"] = f"{args.dir_name}.cmdp_env"
+    importlib.import_module(os.environ["OMNISAFE_ENV_MODULE"])  # <-- add this
     eg = ExperimentGrid(exp_name='Run')
 
     # Define algorithm categories
@@ -48,9 +51,6 @@ def run_experiments(args):
 
     # Target environment
     eg.add('env_id', [args.env_id])
-
-    print(dir(eg))
-
     # GPU configuration
     available_gpus = list(range(torch.cuda.device_count()))
     gpu_id = [args.gpu_id] if args.gpu_id is not None else None
@@ -91,8 +91,8 @@ def run_experiments(args):
     eg.add('algo_cfgs:steps_per_epoch', [args.steps_per_epoch])
 
     # Environment config file and parameters
-    eg.add('env_cfgs:env_init_config:config_file', [os.path.join(args.dir_name, args.environment_config_file_path)])
-
+    eg.add('env_cfgs:env_init_cfgs:config_file', [args.environment_config_file_path])
+    print(args.environment_config_file_path)
     # Run training, analysis, and evaluation
     eg.run(train, num_pool=args.num_pool, gpu_id=gpu_id)
     eg.analyze(parameter='algo', values=None, compare_num=args.compare_num)
@@ -139,5 +139,7 @@ def main():
 
 
 if __name__ == "__main__":
+    
+
     main()
     
