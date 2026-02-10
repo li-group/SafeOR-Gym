@@ -103,7 +103,7 @@ class Generator_transmission_expansion_env(gym.Env):
         self.maxgen = {"i1":{ "r1": 10,"r2":10}}
         self.installcost = {"generators" : {"i1":0},"transmission":{"r1_r2":0}}
         self.window_len = 2
-        self.action_sample_file = './data/gen_trans_exp_default_action_sample.json'
+        self.action_sample_file = 'Generation and Transmission Expansion Planning(GTEPEnv)/data/gen_trans_exp_default_action_sample.json'
         self.config_file = kwargs.get('config_file', '')
         with open(self.config_file ,"r") as f:
             env_config_read = f.read()
@@ -274,5 +274,6 @@ class Generator_transmission_expansion_env(gym.Env):
 
     def set_seed(self, seed: int) -> None:
         random.seed(seed)
+
 
 
