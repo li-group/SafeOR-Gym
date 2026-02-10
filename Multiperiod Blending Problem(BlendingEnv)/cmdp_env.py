@@ -119,7 +119,7 @@ class Blendenv_safe(CMDP):
     }
     agent = omnisafe.Agent(ALGO, env_id, custom_cfgs=custom_cfgs)
     agent.learn()'''
-def recurse(eg,current, path=[],):
+'''def recurse(eg,current, path=[],):
     if isinstance(current, dict):
         for k, v in current.items():
             recurse(eg,v, path + [str(k)])
@@ -253,9 +253,10 @@ if __name__ == '__main__':
 
     eg.analyze(parameter='algo', values=None, compare_num=5)
     #eg.render(num_episodes=1, render_mode='rgb_array', width=256, height=256)
-    a = eg.evaluate(num_episodes=10)
+    a = eg.evaluate(num_episodes=10)'''
 
     
     
 
     
+
