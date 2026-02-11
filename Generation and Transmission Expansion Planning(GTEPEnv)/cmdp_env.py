@@ -1,3 +1,6 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
 import warnings
 import torch
 from omnisafe.common.experiment_grid import ExperimentGrid
@@ -196,3 +199,4 @@ if __name__ == '__main__':
     
 
     
+
