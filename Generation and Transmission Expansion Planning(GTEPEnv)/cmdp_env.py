@@ -103,7 +103,7 @@ def recurse(eg,current, path=[],):
         val = current if isinstance(current, list) else [current]
         eg.add(key, val)
 
-if __name__ == '__main__':
+'''if __name__ == '__main__':
     
 
     algos =  ['CPO','TRPOLag', 'P3O', 'OnCRPO', 'DDPGLag']
@@ -195,8 +195,9 @@ if __name__ == '__main__':
     
     eg.analyze(parameter='algo', values=None, compare_num=5)
     #eg.render(num_episodes=1, render_mode='rgb_array', width=256, height=256)
-    a = eg.evaluate(num_episodes=10)
+    a = eg.evaluate(num_episodes=10)'''
     
 
     
+
 
