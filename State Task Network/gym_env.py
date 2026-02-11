@@ -138,7 +138,7 @@ class STNEnv(gym.Env):
         # Set up debug flag and logger.
         self.config_file = kwargs.get('config_file')        
         self.debug = kwargs.get('debug', False)
-        self.sanitization_cost_weight = kwargs.get('sanitization_cost_weight')
+        self.sanitization_cost_weight = kwargs.get('sanitization_cost_weight', 1.0)
         self.cost_coefficient = kwargs.get('cost_coefficient', 1.0)
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.env_spec_log = {"Penalties/inv_lb" : 0, "Penalties/inv_ub" : 0, "Penalties/equip_lb" : 0., 'Rewards/revenue' : 0., 'Rewards/utility_cost' : 0, 'Rewards/unmet_penalty' : 0, 'Rewards/reactant_penalty' : 0}

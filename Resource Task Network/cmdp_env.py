@@ -30,7 +30,7 @@ class SafeRTN(CMDP):
         
         self._device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         # Instantiate the environment object
-        self._env = RTNEnv(env_id = env_id, **kwargs.get('env_init_config', {}))
+        self._env = RTNEnv(env_id = env_id, **kwargs.get('env_init_cfgs', {}))
         # Specify the action space for initialization by the algorithm layer
         self._action_space = self._env.action_space
         # Specify the observation space for initialization by the algorithm layer
