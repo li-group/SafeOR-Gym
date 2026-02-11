@@ -8,6 +8,7 @@ import warnings
 import argparse
 import importlib
 import importlib.util
+from omnisafe.envs.core import support_envs
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -30,12 +31,64 @@ from omnisafe.utils.config import Config
 from omnisafe.utils.exp_grid_tools import train
 from omnisafe.common.experiment_grid import ExperimentGrid
 
-module = importlib.import_module("Resource Task Network.cmdp_env")
-SafeRTN = module.SafeRTN
+def import_env_registration_from_dir(dir_name: str) -> set:
+    """Import the module in `dir_name` that registers environments (runs @env_register).
+
+    Returns the set of supported env ids after importing.
+    """
+    env_dir = os.path.abspath(dir_name)
+    if not os.path.isdir(env_dir):
+        raise FileNotFoundError(f"Environment directory not found: {dir_name}")
+
+    before = set(support_envs())
+
+    # Look for python files containing the registration decorator and import them
+    for fname in sorted(os.listdir(env_dir)):
+        if not fname.endswith('.py'):
+            continue
+        path = os.path.join(env_dir, fname)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception:
+            continue
+        if '@env_register' in content:
+            module_name = f"custom_envs.{os.path.basename(env_dir)}_{fname[:-3]}"
+            spec = importlib.util.spec_from_file_location(module_name, path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = mod
+                spec.loader.exec_module(mod)
+                break
+
+    # If nothing found, try importing package __init__ (if present)
+    init_path = os.path.join(env_dir, '__init__.py')
+    if os.path.exists(init_path):
+        try:
+            module_name = f"custom_envs.{os.path.basename(env_dir)}"
+            spec = importlib.util.spec_from_file_location(module_name, init_path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = mod
+                spec.loader.exec_module(mod)
+        except Exception:
+            pass
+
+    after = set(support_envs())
+    return after
 
 def run_experiments(args):
-    # importlib.import_module(f"{args.dir_name}")
+    # Ensure the environment package/module in the given folder is imported
+    try:
+        registered = import_env_registration_from_dir(args.dir_name)
+    except Exception as e:
+        raise RuntimeError(f"Failed to import environment from {args.dir_name}: {e}")
 
+    # Validate the requested env_id is available
+    if args.env_id not in support_envs():
+        raise ValueError(
+            f"env_id {args.env_id} not found in registered environments. Available: {support_envs()}"
+        )
     eg = ExperimentGrid(exp_name='Run')
 
     # Define algorithm categories
