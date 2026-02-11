@@ -7,9 +7,6 @@ import logging
 import warnings
 import argparse
 import importlib
-import importlib.util
-from omnisafe.envs.core import support_envs
-
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import numpy as np
@@ -17,7 +14,7 @@ from typing import Any, ClassVar, List, Tuple, Optional, Dict
 
 import torch
 import torch.nn as nn
-import pyomo.environ as po
+#import pyomo.environ as po
 
 import gymnasium as gym
 from gymnasium.spaces.utils import flatten_space
@@ -30,65 +27,18 @@ from omnisafe import Agent
 from omnisafe.utils.config import Config
 from omnisafe.utils.exp_grid_tools import train
 from omnisafe.common.experiment_grid import ExperimentGrid
+import os
+import importlib
 
-def import_env_registration_from_dir(dir_name: str) -> set:
-    """Import the module in `dir_name` that registers environments (runs @env_register).
+_env_mod = os.environ.get("OMNISAFE_ENV_MODULE")
+if _env_mod:
+    importlib.import_module(_env_mod)  # triggers registration
 
-    Returns the set of supported env ids after importing.
-    """
-    env_dir = os.path.abspath(dir_name)
-    if not os.path.isdir(env_dir):
-        raise FileNotFoundError(f"Environment directory not found: {dir_name}")
-
-    before = set(support_envs())
-
-    # Look for python files containing the registration decorator and import them
-    for fname in sorted(os.listdir(env_dir)):
-        if not fname.endswith('.py'):
-            continue
-        path = os.path.join(env_dir, fname)
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except Exception:
-            continue
-        if '@env_register' in content:
-            module_name = f"custom_envs.{os.path.basename(env_dir)}_{fname[:-3]}"
-            spec = importlib.util.spec_from_file_location(module_name, path)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = mod
-                spec.loader.exec_module(mod)
-                break
-
-    # If nothing found, try importing package __init__ (if present)
-    init_path = os.path.join(env_dir, '__init__.py')
-    if os.path.exists(init_path):
-        try:
-            module_name = f"custom_envs.{os.path.basename(env_dir)}"
-            spec = importlib.util.spec_from_file_location(module_name, init_path)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = mod
-                spec.loader.exec_module(mod)
-        except Exception:
-            pass
-
-    after = set(support_envs())
-    return after
 
 def run_experiments(args):
-    # Ensure the environment package/module in the given folder is imported
-    try:
-        registered = import_env_registration_from_dir(args.dir_name)
-    except Exception as e:
-        raise RuntimeError(f"Failed to import environment from {args.dir_name}: {e}")
-
-    # Validate the requested env_id is available
-    if args.env_id not in support_envs():
-        raise ValueError(
-            f"env_id {args.env_id} not found in registered environments. Available: {support_envs()}"
-        )
+    #importlib.import_module(f"{args.dir_name}.cmdp_env")
+    os.environ["OMNISAFE_ENV_MODULE"] = f"{args.dir_name}.cmdp_env"
+    importlib.import_module(os.environ["OMNISAFE_ENV_MODULE"])
     eg = ExperimentGrid(exp_name='Run')
 
     # Define algorithm categories
@@ -101,9 +51,6 @@ def run_experiments(args):
 
     # Target environment
     eg.add('env_id', [args.env_id])
-
-    print(dir(eg))
-
     # GPU configuration
     available_gpus = list(range(torch.cuda.device_count()))
     gpu_id = [args.gpu_id] if args.gpu_id is not None else None
@@ -144,8 +91,8 @@ def run_experiments(args):
     eg.add('algo_cfgs:steps_per_epoch', [args.steps_per_epoch])
 
     # Environment config file and parameters
-    eg.add('env_cfgs:env_init_config:config_file', [os.path.join(args.dir_name, args.environment_config_file_path)])
-
+    eg.add('env_cfgs:env_init_cfgs:config_file', [args.environment_config_file_path])
+    print(args.environment_config_file_path)
     # Run training, analysis, and evaluation
     eg.run(train, num_pool=args.num_pool, gpu_id=gpu_id)
     eg.analyze(parameter='algo', values=None, compare_num=args.compare_num)
@@ -192,5 +139,7 @@ def main():
 
 
 if __name__ == "__main__":
+    
+
     main()
     

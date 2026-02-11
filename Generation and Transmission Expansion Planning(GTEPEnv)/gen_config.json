@@ -1,6 +1,6 @@
 {
     "env_init_cfgs": {
-        "action_sample_file":"data/action_sample_base_1.json",
+        "action_sample_file":"Generation and Transmission Expansion Planning(GTEPEnv)/data/action_sample_base_1.json",
         "T": 10,
         "gencap": {
             "i1": 15,
