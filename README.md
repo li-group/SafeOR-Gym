@@ -148,6 +148,25 @@ eg.run(train, num_pool = 1, gpu_id=gpu_id)
 eg.analyze(parameter='algo', values = None, compare_num = 5)
 a = eg.evaluate(num_episodes = 10)
 ```
+All benchmarking experiments can be executed using main.py. The script exposes configurable parameters through command-line arguments, allowing flexible evaluation across environments and algorithms. Below is the structure of the command
+```
+python main.py \
+  --dir_name "<ENV_DIRECTORY>" \
+  --env_id <ENV_ID> \
+  --environment_config_file_path "<CONFIG_PATH>" \
+  --steps_per_epoch <STEPS> \
+  --T <HORIZON> \
+  --total_epochs <EPOCHS> \
+  --output_activation_function <ACTIVATION> \
+  --seed <SEED> \
+  --vector_env_nums <NUM_ENVS> \
+  --torch_threads <NUM_THREADS> \
+  --gpu_id <GPU_ID> \
+  --num_pool <NUM_POOL> \
+  --compare_num <NUM_ALGOS> \
+  --num_episodes <EVAL_EPISODES> \
+  [--use_tensorboard]
+```
 ## Cite us
 <a name="citation"></a>
 Cite us ❤️
