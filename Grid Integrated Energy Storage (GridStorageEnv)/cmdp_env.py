@@ -1,4 +1,4 @@
-print("Running Battery Operation OmniSafe Script: Don't Worry")
+
 import warnings
 import torch
 from omnisafe.common.experiment_grid import ExperimentGrid
