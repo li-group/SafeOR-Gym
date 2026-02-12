@@ -120,7 +120,7 @@ class InvMgmtEnv(gym.Env):
         # Assign environment configuration parameters
         config_path = kwargs.pop('config_file', None)
         if config_path is None:
-            raise ValueError("You must pass config_path in kwargs")
+            raise ValueError("You must pass config_file in kwargs")
 
         raw_cfg = self.load_config(config_path)
         assign_env_config(self, raw_cfg)
