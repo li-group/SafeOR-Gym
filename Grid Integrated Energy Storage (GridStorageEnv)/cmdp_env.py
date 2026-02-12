@@ -3,7 +3,9 @@ import warnings
 import torch
 from omnisafe.common.experiment_grid import ExperimentGrid
 from omnisafe.utils.exp_grid_tools import train
-import os
+import os, sys
+sys.path.insert(0, os.path.dirname(__file__))
+
 
 
 import numpy as np
@@ -14,7 +16,7 @@ import json
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
-import os, sys
+
 #from utils import *
 #from PIL import Image, ImageDraw, ImageFont
 from omnisafe.envs.core import CMDP, env_register, env_unregister
@@ -28,7 +30,7 @@ import os
 import numpy as np
 import omnisafe
 
-from battery_env_gym import BatteryOperationEnv
+from gym_env import BatteryOperationEnv
 
 @env_register
 class BatteryOperaionSafe(CMDP):
