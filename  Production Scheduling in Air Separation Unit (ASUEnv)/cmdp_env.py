@@ -1,8 +1,11 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
 import warnings
 import torch
 from omnisafe.common.experiment_grid import ExperimentGrid
 from omnisafe.utils.exp_grid_tools import train
-
+import time
 import numpy as np
 import gymnasium as gym
 from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete
@@ -24,15 +27,12 @@ import yaml
 import os
 import numpy as np
 import omnisafe
-import os
-import sys
-sys.path.insert(0, os.path.dirname(__file__))
 
-from gym_env import GASU
+from gym_env import ASUEnv
 
 @env_register
-class GASU_env_safe(CMDP):
-    _support_envs = ['GASU-v0']
+class ASU_env_safe(CMDP):
+    _support_envs = ['ASU1']
     need_auto_reset_wrapper = True  
     need_time_limit_wrapper = True  
     num_envs = 1
@@ -42,7 +42,7 @@ class GASU_env_safe(CMDP):
         #print(kwargs)
         self._device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         # Instantiate the environment object
-        self._env = GASU(env_id=env_id, **kwargs.get('env_init_cfgs', {}))
+        self._env = ASUEnv(env_id=env_id, **kwargs.get('env_init_cfgs', {}))
         # Specify the action space for initialization by the algorithm layer
         self._action_space = self._env.action_space
         # Specify the observation space for initialization by the algorithm layer
@@ -94,3 +94,18 @@ class GASU_env_safe(CMDP):
     @property
     def env_spec_log(self):
         return self._env.env_spec_log
+
+def recurse(eg,current, path=[],):
+    if isinstance(current, dict):
+        for k, v in current.items():
+            recurse(eg,v, path + [str(k)])
+    else:
+        key = 'env_cfgs:' + ':'.join(path)
+        val = current if isinstance(current, list) else [current]
+        # eg.add(key, val)
+        if isinstance(val, dict):
+            eg.add(key, [str(val)])
+        elif isinstance(val, list) and any(isinstance(v, dict) for v in val):
+            eg.add(key, [str(v) if isinstance(v, dict) else v for v in val])
+        else:
+            eg.add(key, val)

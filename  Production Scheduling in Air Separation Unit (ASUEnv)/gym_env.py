@@ -73,9 +73,9 @@ class ASUEnv(gym.Env):
         self.env_id = env_id
         self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
     
-        config_path = kwargs.get('config_path')
+        config_path = kwargs.get('config_file')
         if config_path is None:
-            raise ValueError("config_path must be provided for ASUEnv.")
+            raise ValueError("config_file must be provided for ASUEnv.")
         # Load and assign configuration, Load and stash raw config, then assign each field
         config_data = load_config(config_path)
         self.config_data = config_data              # ← add this line
