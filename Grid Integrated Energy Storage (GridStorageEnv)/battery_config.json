@@ -1,4 +1,4 @@
-{
+{"gym_init_cfgs":{
   "time_periods": 24,
   "Buses": [1, 2, 3],
   "Generators": [1, 2, 3],
@@ -124,4 +124,4 @@
   "PhiSOC": 20.0,
   "PhiTheta": 20.0,
   "PhiFlowRatio": 100.0
-}
+}}
