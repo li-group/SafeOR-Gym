@@ -118,7 +118,7 @@ class InvMgmtEnv(gym.Env):
         self.env_id = env_id
         
         # Assign environment configuration parameters
-        config_path = kwargs.pop('config_path', None)
+        config_path = kwargs.pop('config_file', None)
         if config_path is None:
             raise ValueError("You must pass config_path in kwargs")
 
@@ -709,7 +709,9 @@ class InvMgmtEnv(gym.Env):
             Preprocessed configuration dictionary.
         """
         
-        cfg = json.load(open(path))
+        cfg_full = json.load(open(path))
+
+        cfg = cfg_full["env_init_cfgs"]
 
         # 1) integer-keyed dicts
         for name in ["initial_inv","inventory_holding_cost", "inv_capacity", "j_in", "j_out", "operating_cost", "production_yield"]:
