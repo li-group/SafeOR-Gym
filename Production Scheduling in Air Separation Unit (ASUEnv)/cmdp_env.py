@@ -25,7 +25,7 @@ import os
 import numpy as np
 import omnisafe
 
-from ASU_env import ASUEnv
+from gym_env import ASUEnv
 
 @env_register
 class ASU_env_safe(CMDP):
