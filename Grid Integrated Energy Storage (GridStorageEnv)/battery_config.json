@@ -1,4 +1,4 @@
-{"gym_init_cfgs":{
+{"env_init_cfgs":{
   "time_periods": 24,
   "Buses": [1, 2, 3],
   "Generators": [1, 2, 3],
