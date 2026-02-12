@@ -68,9 +68,9 @@ class BatteryOperationEnv(gym.Env):
         self._device = 'cuda' if th.cuda.is_available() else 'cpu'
 
         # --- 1) Load and validate configuration ---
-        config_path = kwargs.pop('config_path', None)
+        config_path = kwargs.pop('config_file', None)
         if config_path is None:
-            raise ValueError("`config_path` must be provided in kwargs")
+            raise ValueError("`config_file` must be provided in kwargs")
         raw_cfg = self.load_config(config_path)
         assign_env_config(self, raw_cfg)
 
@@ -653,7 +653,8 @@ class BatteryOperationEnv(gym.Env):
 
 
     def load_config(self, path):
-        cfg = json.load(open(path))
+        cfg_full = json.load(open(path))
+        cfg = cfg_full["env_init_cfgs"]
 
         # parse lines as tuples
         cfg["TransmissionLines"] = [tuple(x) for x in cfg.get("TransmissionLines", [])]
