@@ -1,83 +1,27 @@
 import numpy as np
 import pyomo.environ as pe
-import json
-import os
 
 
-def build_optimization_model(args):
-
-    config_path = getattr(args, 'config_path', None)
-    if config_path is None:
-        config_path = os.path.join(os.path.dirname(__file__), 'unit_commitment_config.json')
-
-    with open(config_path, 'r') as f:
-        cfg = json.load(f)
-
-    base_cfg = cfg.get('common', {})
-    if args.env_id in cfg:
-        env_cfg = cfg[args.env_id]
-    elif 'common' in cfg:
-        raise ValueError(f"Config missing section for env_id '{args.env_id}'")
-    else:
-        env_cfg = cfg
-
-    cfg = {**base_cfg, **env_cfg}
-
-    def _int_keyed_dict(d):
-        return {int(k): v for k, v in d.items()}
-
-    if 'gen_bus' in cfg:
-        cfg['gen_bus'] = _int_keyed_dict(cfg['gen_bus'])
-    if 'bus_gen' in cfg:
-        cfg['bus_gen'] = {int(k): v for k, v in cfg['bus_gen'].items()}
-    if 'line_bus' in cfg:
-        cfg['line_bus'] = {int(k): tuple(v) for k, v in cfg['line_bus'].items()}
-    if 'u0_seq' in cfg:
-        cfg['u0_seq'] = {int(k): np.array(v, dtype=float) for k, v in cfg['u0_seq'].items()}
-
-    float_array_keys = {
-        'B', 'F_max', 'F_min', 'Pi_max', 'Pi_min', 'pi0', 'loc', 'scale',
-        'deterministic_demand', 'P_max', 'P_min', 'a', 'b', 'c', 'RU', 'RD',
-        'SU', 'SD', 'hot_cost', 'cold_cost', 'C_SD', 'u0_prev', 'u0',
-        'p0_prev', 'p0'
-    }
-    int_array_keys = {'UT', 'DT', 'cold_hrs'}
-
-    for key in float_array_keys:
-        if key in cfg:
-            cfg[key] = np.array(cfg[key], dtype=float)
-    for key in int_array_keys:
-        if key in cfg:
-            cfg[key] = np.array(cfg[key], dtype=int)
-
-    for key in ['T', 'num_gen', 'num_bus', 'num_line']:
-        if key in cfg:
-            cfg[key] = int(cfg[key])
-
-    num_gen = cfg['num_gen']
-    T = cfg['T']
-    num_bus = cfg['num_bus']
-    gen_bus = cfg['gen_bus']
-    bus_gen = cfg['bus_gen']
-    num_line = cfg['num_line']
-    line_bus = cfg['line_bus']
-    B = cfg['B']
-    F_max = cfg['F_max']
-    F_min = cfg['F_min']
-    Pi_max = cfg['Pi_max']
-    Pi_min = cfg['Pi_min']
-    pi0 = cfg['pi0']
-    deterministic_demand = cfg['deterministic_demand']
+def create_model(env):
+    num_gen = env.num_gen
+    T = env.T
+    num_bus = env.num_bus
+    gen_bus = env.gen_bus
+    bus_gen = env.bus_gen
+    num_line = env.num_line
+    line_bus = env.line_bus
+    B = env.B
+    F_max = env.F_max
+    F_min = env.F_min
+    Pi_max = env.Pi_max
+    Pi_min = env.Pi_min
+    pi0 = env.pi0
+    deterministic_demand = env.deterministic_demand
 
     horizon = range(1, T + 1)
     generators = range(num_gen)
     buses = range(num_bus)
     lines = range(num_line)
-    # line_from_bus = {k: [] for k in lines}
-    # line_to_bus = {k: [] for k in lines}
-    # for line in lines:
-    #     line_from_bus[line].append(line_bus[line][0])
-    #     line_to_bus[line].append(line_bus[line][1])
     line_from_bus = {}
     line_to_bus = {}
     for line in lines:
@@ -90,26 +34,26 @@ def build_optimization_model(args):
         from_bus_lines[from_bus].append(line)
         to_bus_lines[to_bus].append(line)
 
-    P_max = cfg['P_max']
-    P_min = cfg['P_min']
-    a = cfg['a']
-    b = cfg['b']
-    c = cfg['c']
-    UT = cfg['UT']
-    DT = cfg['DT']
-    RU = cfg['RU']
-    RD = cfg['RD']
-    SU = cfg['SU']
-    SD = cfg['SD']
-    hot_cost = cfg['hot_cost']
-    cold_cost = cfg['cold_cost']
-    cold_hrs = cfg['cold_hrs']
-    C_SD = cfg['C_SD']
-    C_LS = cfg['C_LS']
-    C_RP = cfg['C_RP']
-    R = cfg['R']
+    P_max = env.P_max
+    P_min = env.P_min
+    a = env.a
+    b = env.b
+    c = env.c
+    UT = env.UT
+    DT = env.DT
+    RU = env.RU
+    RD = env.RD
+    SU = env.SU
+    SD = env.SD
+    hot_cost = env.hot_cost
+    cold_cost = env.cold_cost
+    cold_hrs = env.cold_hrs
+    C_SD = env.C_SD
+    C_LS = env.C_LS
+    C_RP = env.C_RP
+    R = env.R
 
-    u0_seq = cfg['u0_seq']
+    u0_seq = env.u0_seq
     v0_seq = {}
     w0_seq = {}
     for i in generators:
@@ -127,8 +71,8 @@ def build_optimization_model(args):
         for t in range(DT[i]):
             w_prev.update({(-t, i): w0_seq[i][t]})
 
-    u0 = cfg['u0']
-    p0 = cfg['p0']
+    u0 = env.u0
+    p0 = env.p0
 
     model = pe.ConcreteModel()
     model.T_set = pe.Set(initialize=horizon)
@@ -136,8 +80,6 @@ def build_optimization_model(args):
     model.buses = pe.Set(initialize=buses)
     model.lines = pe.Set(initialize=lines)
     model.bus_gen = pe.Set(model.buses, initialize=bus_gen)
-    # model.line_from_bus = pe.Set(model.lines, initialize=lambda m, l: line_bus[l][0])
-    # model.line_to_bus = pe.Set(model.lines, initialize=lambda m, l: line_bus[l][0])
     model.from_bus_lines = pe.Set(model.buses, initialize=from_bus_lines)
     model.to_bus_lines = pe.Set(model.buses, initialize=to_bus_lines)
     model.v_prev_set = pe.Set(initialize=v_prev_set)
@@ -323,7 +265,6 @@ def build_optimization_model(args):
 
     model.obj = pe.Objective(expr=sum(model.total_cost[t] for t in model.T_set), sense=pe.minimize)
     return model
-
 
 
 
