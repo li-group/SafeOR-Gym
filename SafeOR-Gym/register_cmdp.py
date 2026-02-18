@@ -23,10 +23,12 @@ import torch.nn.functional as F
 import os, sys
 #from utils import *
 #from PIL import Image, ImageDraw, ImageFont
-from omnisafe.envs.core import CMDP, env_register, env_unregister
+from omnisafe.envs.core import CMDP
+#, env_register, env_unregister
 from omnisafe.common.logger import Logger
 import random
-from typing import Any, ClassVar, List, Tuple, Optional, Dict
+from typing import Any, ClassVar, List, Tuple, Optional
+from omnisafe.envs import env_register
 
 import torch as th
 import yaml
@@ -39,9 +41,6 @@ def build_and_register_cmdp_env(
     base_env_cls: Type,                 # e.g., ASUEnv
     wrapper_class_name: str,            # e.g., "ASU_env_safe"
     support_envs: List[str],            # e.g., ["ASU1"]
-    need_auto_reset_wrapper: bool = True,
-    need_time_limit_wrapper: bool = True,
-    num_envs: int = 1,
 ):
     """
     Dynamically creates and registers an OmniSafe CMDP wrapper around `base_env_cls`.
@@ -50,12 +49,12 @@ def build_and_register_cmdp_env(
         The newly created wrapper class (already decorated with @env_register).
     """
 
-    @env_register
+    #@env_register
     class _GeneratedCMDP(CMDP):
         _support_envs = support_envs
-        need_auto_reset_wrapper = need_auto_reset_wrapper
-        need_time_limit_wrapper = need_time_limit_wrapper
-        num_envs = num_envs
+        need_auto_reset_wrapper = True  
+        need_time_limit_wrapper = True  
+        num_envs = 1
 
         def __init__(self, env_id: str, **kwargs: Any) -> None:
             super().__init__(env_id)
@@ -127,5 +126,5 @@ def build_and_register_cmdp_env(
     _GeneratedCMDP.__name__ = wrapper_class_name
     _GeneratedCMDP.__qualname__ = wrapper_class_name
     _GeneratedCMDP.__module__ = __name__
-
-    return _GeneratedCMDP
+    registered_class = env_register(_GeneratedCMDP)
+    return registered_class
