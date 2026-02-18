@@ -32,122 +32,30 @@ def get_sbp(connections):
     demands = list(set(p_list))
     
     return sources, blenders, demands
-alpha = 0
-beta = 0
 
 
-problem_data = {
-    "alpha": 0,
-    "beta": 0,
+def build_optimization_model(env):
 
-    "tau0": {
-        "s1": [10, 10, 10, 0, 0, 0],
-        "s2": [30, 30, 30, 0, 0, 0],
-    },
-
-    "delta0": {
-        "p1": [0, 0, 15, 15, 15, 15],
-        "p2": [0, 0, 15, 15, 15, 15],
-    },
-
-    "sigma": {
-        "s1": {"q1": 0.06, "q2": 0.10},
-        "s2": {"q1": 0.26, "q2": 0.50},
-    },
-
-    "sigma_ub": {
-        "p1": {"q1": 0.16, "q2": 0.8},
-        "p2": {"q1": 1.0, "q2": 0.9},
-    },
-
-    "sigma_lb": {
-        "p1": {"q1": 0.0, "q2": 0.0},
-        "p2": {"q1": 0.0, "q2": 0.0},
-    },
-
-    "s_inv_lb": {
-        "s1": 0,
-        "s2": 0,
-    },
-
-    "s_inv_ub": {
-        "s1": 999,
-        "s2": 999,
-    },
-
-    "d_inv_lb": {
-        "p1": 0,
-        "p2": 0,
-    },
-
-    "d_inv_ub": {
-        "p1": 999,
-        "p2": 999,
-    },
-
-    "betaT_d": {
-        "p1": 20,
-        "p2": 10,
-    },
-
-    "betaT_s": {
-        "s1": 0,
-        "s2": 0,
-    },
-
-    "b_inv_ub": {
-        "j1": 30,
-        "j2": 30,
-        "j3": 30,
-        "j4": 30,
-    },
-
-    "b_inv_lb": {
-        "j1": 0,
-        "j2": 0,
-        "j3": 0,
-        "j4": 0,
-    },
-
-    "window_len": 2,
-    "T": 6,
-
-    "properties": ["q1", "q2"],
-    "action_sample_file": "./data/action_sample_simple_blend.json",
-    "connections_file": "./data/connections_simple_blend.json" 
-    
-}
-
-
-
-
-def build_optimization_model(problem_data = problem_data):
-
-    alpha      = problem_data["alpha"]
-    beta       = problem_data["beta"]
-    tau0       = problem_data["tau0"]
-    delta0     = problem_data["delta0"]
-    sigma      = problem_data["sigma"]
-    sigma_ub   = problem_data["sigma_ub"]
-    sigma_lb   = problem_data["sigma_lb"]
-    s_inv_lb   = problem_data["s_inv_lb"]
-    s_inv_ub   = problem_data["s_inv_ub"]
-    d_inv_lb   = problem_data["d_inv_lb"]
-    d_inv_ub   = problem_data["d_inv_ub"]
-    betaT_d    = problem_data["betaT_d"]
-    betaT_s    = problem_data["betaT_s"]
-    b_inv_ub   = problem_data["b_inv_ub"]
-    b_inv_lb   = problem_data["b_inv_lb"]
-    T          = problem_data["T"]
-    window_len = problem_data["window_len"]
-    properties = problem_data["properties"]
-    
-    with open(problem_data["action_sample_file"] ,"r") as f:
-        action = f.read()
-    action_sample = json.loads(action)
-    with open(problem_data["connections_file"] ,"r") as f:
-        connections_s = f.readline()
-    connections = json.loads(connections_s)
+    alpha      = env.alpha
+    beta       = env.beta
+    tau0       = env.tau0 
+    delta0     = env.delta0
+    sigma      = env.sigma
+    sigma_ub   = env.sigma_ub
+    sigma_lb   = env.sigma_lb
+    s_inv_lb   = env.s_inv_lb
+    s_inv_ub   = env.s_inv_ub
+    d_inv_lb   = env.d_inv_lb
+    d_inv_ub   = env.d_inv_ub
+    betaT_d    = env.betaT_d
+    betaT_s    = env.betaT_s
+    b_inv_ub   = env.b_inv_ub
+    b_inv_lb   = env.b_inv_lb
+    T          = env.T
+    window_len = env.window_len
+    properties = env.properties
+    action_sample = env.action_sample
+    connections = env.connections
     sources, blenders, demands = get_sbp(connections)
     timestamps_act = list(range(1,T+1))
     timestamps_inv = list(range(T+1))
@@ -335,6 +243,7 @@ def build_optimization_model(problem_data = problem_data):
 
     model.obj = Objective(rule=obj_function, sense=maximize)
     return model
+
 
 
 
