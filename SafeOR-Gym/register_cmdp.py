@@ -128,3 +128,23 @@ def build_and_register_cmdp_env(
     _GeneratedCMDP.__module__ = __name__
     registered_class = env_register(_GeneratedCMDP)
     return registered_class
+
+
+def safeor_make(
+    env_id: str,
+    config_file: str,
+    *,
+    device: Optional[str] = None
+):
+   
+    for cmdp_cls in registry.values():
+        if hasattr(cmdp_cls, "_support_envs") and env_id in getattr(cmdp_cls, "_support_envs"):
+            env_init_cfgs = {"config_file": config_file, **extra_env_init_cfgs}
+
+            kwargs = {"env_init_cfgs": env_init_cfgs}
+            if device is not None:
+                kwargs["device"] = device
+
+            return cmdp_cls(env_id=env_id, **kwargs)
+
+    raise ValueError(f"No registered CMDP found that supports env_id='{env_id}'.")
