@@ -9,8 +9,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import warnings
 import torch
-from omnisafe.common.experiment_grid import ExperimentGrid
-from omnisafe.utils.exp_grid_tools import train
+
 import time
 import numpy as np
 import gymnasium as gym
@@ -21,11 +20,9 @@ import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 import os, sys
-#from utils import *
-#from PIL import Image, ImageDraw, ImageFont
+
 from omnisafe.envs.core import CMDP
-#, env_register, env_unregister
-from omnisafe.common.logger import Logger
+
 import random
 from typing import Any, ClassVar, List, Tuple, Optional
 from omnisafe.envs import env_register
@@ -34,7 +31,7 @@ import torch as th
 import yaml
 import os
 import numpy as np
-import omnisafe
+
 
 def build_and_register_cmdp_env(
     *,
