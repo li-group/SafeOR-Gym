@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "safeor-gym"
+version = "0.1.0"
+description = "SafeOR-Gym: Safe RL benchmark environments for operations research problems."
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+  "gymnasium",
+  "numpy",
+  "torch>=1.10",
+  "pyyaml",
+  "omnisafe",
+  "scipy",
+  "pyomo",
+]
+
+[project.optional-dependencies]
+# Only include if some envs truly require these at runtime
+
+
+analysis = [
+  "matplotlib",
+  "pandas",
+]
+
+dev = [
+  "pytest",
+  "ruff",
+  "black",
+  "isort",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
