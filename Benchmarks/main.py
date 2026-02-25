@@ -7,6 +7,7 @@ import logging
 import warnings
 import argparse
 import importlib
+from pathlib import Path
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import numpy as np
@@ -29,16 +30,9 @@ from omnisafe.utils.exp_grid_tools import train
 from omnisafe.common.experiment_grid import ExperimentGrid
 import os
 import importlib
-
-_env_mod = os.environ.get("OMNISAFE_ENV_MODULE")
-if _env_mod:
-    importlib.import_module(_env_mod)  # triggers registration
-
+import SafeOR_Gym
 
 def run_experiments(args):
-    #importlib.import_module(f"{args.dir_name}.cmdp_env")
-    os.environ["OMNISAFE_ENV_MODULE"] = f"{args.dir_name}.cmdp_env"
-    importlib.import_module(os.environ["OMNISAFE_ENV_MODULE"])
     eg = ExperimentGrid(exp_name='Run')
 
     # Define algorithm categories
@@ -50,7 +44,9 @@ def run_experiments(args):
     offline_policy = ['DDPGLag']
 
     # Target environment
-    eg.add('env_id', [args.env_id])
+    eg.add('env_id', [args.env_id]) 
+    env = SafeOR_Gym.safeor_make(args.env_id,args.environment_config_file_path)
+    T = env._env.T
     # GPU configuration
     available_gpus = list(range(torch.cuda.device_count()))
     gpu_id = [args.gpu_id] if args.gpu_id is not None else None
@@ -65,7 +61,7 @@ def run_experiments(args):
     # Logging configuration
     eg.add('logger_cfgs:use_wandb', [args.use_wandb])
     eg.add('logger_cfgs:use_tensorboard', [args.use_tensorboard])
-    eg.add('logger_cfgs:window_lens', [int(args.steps_per_epoch / args.T)])
+    eg.add('logger_cfgs:window_lens', [int(args.steps_per_epoch / T)])
 
     # Parallelism and device
     eg.add('train_cfgs:vector_env_nums', [args.vector_env_nums])
@@ -91,8 +87,10 @@ def run_experiments(args):
     eg.add('algo_cfgs:steps_per_epoch', [args.steps_per_epoch])
 
     # Environment config file and parameters
-    eg.add('env_cfgs:env_init_cfgs:config_file', [args.environment_config_file_path])
-    print(args.environment_config_file_path)
+    environment_config_file_path = SafeOR_Gym.resolve_config_path(args.env_id,args.environment_config_file_path)
+    
+    eg.add('env_cfgs:env_init_cfgs:config_file', [str(environment_config_file_path)])
+    print(environment_config_file_path)
     # Run training, analysis, and evaluation
     eg.run(train, num_pool=args.num_pool, gpu_id=gpu_id)
     eg.analyze(parameter='algo', values=None, compare_num=args.compare_num)
@@ -105,14 +103,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run CMDP experiments via ExperimentGrid.")
 
     # Required args (match run_experiments signature / usage)
-    p.add_argument("--dir_name", type=str, required=True, help="Python package/module directory name containing cmdp_env (e.g. 'myproj').")
+    
     p.add_argument("--env_id", type=str, required=True,  help="Environment ID to pass to ExperimentGrid (env_id).")
-    p.add_argument("--environment_config_file_path", type=str, required=True, help="Path to environment config file used by env_init_config.")
+    
     p.add_argument("--steps_per_epoch", type=int, required=True, help="Steps per epoch.")
-    p.add_argument("--T", type=int, required=True, help="Horizon (used for window length = steps_per_epoch / T).")
+    
     p.add_argument("--total_epochs", type=int, required=True, help="Total number of epochs; total_steps = steps_per_epoch * total_epochs.")
 
     # Optional knobs (sensible defaults)
+    p.add_argument("--environment_config_file_path", type=str, default=None, help="Path to environment config file used by env_init_config.")
     p.add_argument("--output_activation_function", type=str, default=None, help="If set, actor output activation (e.g. 'tanh').")
 
     p.add_argument("--seed", type=int, default=10, help="Random seed.")
@@ -139,7 +138,5 @@ def main():
 
 
 if __name__ == "__main__":
-    
-
     main()
     
