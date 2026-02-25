@@ -35,12 +35,13 @@ The key contributions of this project:
 
 ### Install
 
-Simply run the bash file requirements.sh. The file can be modified to change the environment name or use any other package manager.
-
 ```bash
-bash requirements.sh
+git clone https://github.com/li-group/SafeOR-Gym.git
+cd SafeOR-Gym
+pip install -e .
 ```
 Note: This repository uses a modified [version](https://github.com/li-group/omnisafe/tree/main) of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
+
 
 ## Environments
 
