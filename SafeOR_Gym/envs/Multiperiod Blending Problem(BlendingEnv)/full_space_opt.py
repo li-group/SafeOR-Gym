@@ -13,8 +13,32 @@ import argparse
 import copy
 import json
 from pyomo.environ import *
-from utils import *
-
+#from utils import *
+from pyomo.opt import SolverFactory, TerminationCondition
+import SafeOR_Gym
+def flatten_and_track_mappings(dictionary, separator=';'):
+    # Flatten the dictionary using the updated flatten_dict function
+    flattened_dict = flatten_dict(dictionary, separator=separator)
+    
+    # Track the mappings of index to the key split by separator
+    mappings = []
+    for index, (key, value) in enumerate(flattened_dict.items()):
+        # Ensure the key is a string before splitting by separator
+        mapped_key = key.split(separator)  # Split the string key by the separator
+        mappings.append((index, mapped_key))
+    
+    # Convert the flattened values to a numpy array of float32, but skip non-numeric values
+    flattened_values = []
+    for value in flattened_dict.values():
+        if isinstance(value, (int, float)):  # Only include numeric types
+            flattened_values.append(value)
+        elif isinstance(value, dict):  # Skip dictionaries
+            flattened_values.append(0)  # Or set a default value for empty or nested dictionaries
+    
+    # Convert the valid numeric values to a numpy array
+    flattened_array = np.array(flattened_values).astype("float32")
+    
+    return flattened_array, mappings
 def get_sbp(connections):
     # Function to obtain the list of source, blending, demand tank names from the connections
     
@@ -74,15 +98,15 @@ def build_optimization_model(env):
     model.alpha = Param(initialize=alpha)
     model.beta = Param(initialize=beta)
     model.s_inv_ub = Param(model.sources, initialize=s_inv_ub)
-    model.tau0 = Param(model.sources, initialize=tau0)
+    #model.tau0 = Param(model.sources, initialize=tau0)
     model.sigma_lb = Param(model.demands, initialize=sigma_lb)
     model.sigma_ub = Param(model.demands, initialize=sigma_ub)
     model.d_inv_ub = Param(model.demands, initialize=d_inv_ub)
-    model.delta0 = Param(model.demands, initialize=delta0)
+    #model.delta0 = Param(model.demands, initialize=delta0)
     model.betaT_s = Param(model.sources, initialize=betaT_s)
     model.betaT_d = Param(model.demands, initialize=betaT_d)
     model.b_inv_ub = Param(model.blenders, initialize=b_inv_ub)
-
+    
     # Decision variables
     # Before flow but after buy
     model.source_inv = Var(model.sources, model.timestamps_inv, domain=NonNegativeReals)
@@ -133,7 +157,7 @@ def build_optimization_model(env):
 
     # Cannot buy more than what is available
     def material_balance_rule1_0(model, s, t):
-        return model.offer_bought[s, t] <= model.tau0[s][t-1]
+        return model.offer_bought[s, t] <= tau0[s][str(t-1)]
 
     # Updating source inv before outgoing flows but after buy
     
@@ -165,7 +189,7 @@ def build_optimization_model(env):
 
     # Cannot sell more than what is asked
     def material_balance_rule3_0(model, p, t):
-        return model.demand_sold[p, t] <= model.delta0[p][t-1]
+        return model.demand_sold[p, t] <= delta0[p][str(t-1)]
 
     # Updating demand before sell inv
     def material_balance_rule3_1(model, p, t):
@@ -245,5 +269,53 @@ def build_optimization_model(env):
     return model
 
 
+def optimal_simulation(env, solver, tee: bool = True, raise_on_infeasible: bool = True):
+    m = build_optimization_model(env)
+    opt = solver if hasattr(solver, "solve") else SolverFactory(str(solver))
+    results = opt.solve(m, tee=tee)
 
+    term = results.solver.termination_condition
+    ok = term in (TerminationCondition.optimal, TerminationCondition.locallyOptimal)
 
+    if not ok and raise_on_infeasible:
+        raise RuntimeError(
+            f"Optimization did not solve to optimality. Termination condition: {term}"
+        )
+    actions = []
+    
+    for t in m.timestamps_act:
+        action = {}
+        action["source_blend"] = {}
+        for s in m.sources:
+            action["source_blend"][s] = {}
+            for j in m.blenders:
+                if j not in env.connections["source_blend"][s]:
+                    action["source_blend"][s][j] = {}
+                else:
+                    action["source_blend"][s][j] = 2*m.source_blend_flow[s, j, t].value/env.MAXFLOW-1
+        action["blend_blend"] = {}
+        for j1 in m.blenders:
+            action["blend_blend"][j1] = {}
+            for j2 in m.blenders:
+                if j2 not in env.connections["blend_blend"][j1]:
+                    action["blend_blend"][j1][j2] = {}
+                else:
+                    action["blend_blend"][j1][j2] = 2*m.blend_blend_flow[j1,j2,t].value/env.MAXFLOW-1
+        action["blend_demand"] = {}
+        for j in m.blenders:
+            action["blend_demand"][j] = {}
+            for p in m.demands:
+                if p not in m.connections["blend_demand"][j]:
+                    action["blend_demand"][j][p] = {}
+                else:
+                    action["blend_demand"][j][p] = 2*m.blend_demand_flow[j,p,t].value/env.MAXFLOW-1
+        action["tau"] = {}
+        for s in m.sources:
+            action["tau"][s] = 2*m.offer_bought[s,t].value/env.tau0[j[1]][str(t-1)]-1
+        action["delta"] = {}
+        for p in m.demands:
+            action["delta"][p] = 2*m.demand_sold[p,t].value/env.delta0[p][str(t-1)]-1
+        
+        action_flatt, mapp = flatten_and_track_mappings(action)
+        actions.append[action_flatt]
+    return np.array(actions)
