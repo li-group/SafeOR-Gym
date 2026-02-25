@@ -11,11 +11,30 @@ import datetime, time
 import math as m
 import argparse
 import copy
-import json
+import json, torch
 from pyomo.environ import *
 #from utils import *
 from pyomo.opt import SolverFactory, TerminationCondition
 import SafeOR_Gym
+def flatten_dict(dictionary, parent_key='', separator=';'):
+    items = []
+    for key, value in dictionary.items():
+        # Convert tuple keys to a string format before concatenating
+        if isinstance(key, tuple):
+            key = '_'.join(map(str, key))  # Convert tuple to string format (e.g., ('a', 'b') -> 'a_b')
+
+        new_key = parent_key + separator + str(key) if parent_key else key
+
+        if isinstance(value, dict):
+            # If the value is a dictionary (including empty ones), recurse
+            if value:
+                items.extend(flatten_dict(value, new_key, separator=separator).items())
+            #else:
+                # Add empty dictionaries as well
+                #items.append((new_key, {}))
+        else:
+            items.append((new_key, value))
+    return dict(items)
 def flatten_and_track_mappings(dictionary, separator=';'):
     # Flatten the dictionary using the updated flatten_dict function
     flattened_dict = flatten_dict(dictionary, separator=separator)
@@ -305,17 +324,23 @@ def optimal_simulation(env, solver, tee: bool = True, raise_on_infeasible: bool 
         for j in m.blenders:
             action["blend_demand"][j] = {}
             for p in m.demands:
-                if p not in m.connections["blend_demand"][j]:
+                if p not in env.connections["blend_demand"][j]:
                     action["blend_demand"][j][p] = {}
                 else:
                     action["blend_demand"][j][p] = 2*m.blend_demand_flow[j,p,t].value/env.MAXFLOW-1
         action["tau"] = {}
         for s in m.sources:
-            action["tau"][s] = 2*m.offer_bought[s,t].value/env.tau0[j[1]][str(t-1)]-1
+            try:    
+                action["tau"][s] = 2*m.offer_bought[s,t].value/env.tau0[s][str(t-1)]-1
+            except:
+                action["tau"][s] = 2*m.offer_bought[s,t].value-1
         action["delta"] = {}
         for p in m.demands:
-            action["delta"][p] = 2*m.demand_sold[p,t].value/env.delta0[p][str(t-1)]-1
-        
+            try:
+                action["delta"][p] = 2*m.demand_sold[p,t].value/env.delta0[p][str(t-1)]-1
+            except:
+                action["delta"][p] = 2*m.demand_sold[p,t].value-1
         action_flatt, mapp = flatten_and_track_mappings(action)
-        actions.append[action_flatt]
-    return np.array(actions)
+        print(action_flatt)
+        actions.append(action_flatt)
+    return actions
