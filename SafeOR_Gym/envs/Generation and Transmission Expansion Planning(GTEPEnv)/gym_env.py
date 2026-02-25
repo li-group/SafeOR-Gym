@@ -103,8 +103,8 @@ class Generator_transmission_expansion_env(gym.Env):
         self.maxgen = {"i1":{ "r1": 10,"r2":10}}
         self.installcost = {"generators" : {"i1":0},"transmission":{"r1_r2":0}}
         self.window_len = 2
-        self.action_sample_file = 'Generation and Transmission Expansion Planning(GTEPEnv)/data/gen_trans_exp_default_action_sample.json'
         self.config_file = kwargs.get('config_file', '')
+        self.action_sample = {}
         with open(self.config_file ,"r") as f:
             env_config_read = f.read()
         env_config = json.loads(env_config_read)
@@ -112,9 +112,7 @@ class Generator_transmission_expansion_env(gym.Env):
         self.generators = list(self.gencap.keys())
         self.transmission_lines = list(self.tlcap.keys())
         self.regions = list(self.demand.keys())
-        with open(self.action_sample_file ,"r") as f:
-            action = f.read()
-        self.action_sample = json.loads(action)
+        print(self.action_sample)
         self.reset()
         self.flatt_state, self.mapping_obs = flatten_and_track_mappings(self.state)
         self.max_gen = max(v for inner_dict in self.maxgen.values() for v in inner_dict.values())
