@@ -1,17 +1,64 @@
+
+import sys, os
+
+curr_dir = os.path.abspath(os.getcwd())
+sys.path.append(curr_dir)
+
 import numpy as np
+import pandas as pd
+import random as rd
+import datetime, time
+import math as m
+import argparse
+import copy
+import json, torch
 from pyomo.environ import *
-#from pyomo import *
-#import pyomo.environ as pyo
-from pyomo.opt import SolverFactory
-from pyomo.contrib.iis import *
-import openpyxl
-import random
-import numpy as np
-import json
+#from utils import *
+from pyomo.opt import SolverFactory, TerminationCondition
 
+def flatten_dict(dictionary, parent_key='', separator=';'):
+    items = []
+    for key, value in dictionary.items():
+        # Convert tuple keys to a string format before concatenating
+        if isinstance(key, tuple):
+            key = '_'.join(map(str, key))  # Convert tuple to string format (e.g., ('a', 'b') -> 'a_b')
 
+        new_key = parent_key + separator + str(key) if parent_key else key
 
-def create_model(env):
+        if isinstance(value, dict):
+            # If the value is a dictionary (including empty ones), recurse
+            if value:
+                items.extend(flatten_dict(value, new_key, separator=separator).items())
+            #else:
+                # Add empty dictionaries as well
+                #items.append((new_key, {}))
+        else:
+            items.append((new_key, value))
+    return dict(items)
+def flatten_and_track_mappings(dictionary, separator=';'):
+    # Flatten the dictionary using the updated flatten_dict function
+    flattened_dict = flatten_dict(dictionary, separator=separator)
+    
+    # Track the mappings of index to the key split by separator
+    mappings = []
+    for index, (key, value) in enumerate(flattened_dict.items()):
+        # Ensure the key is a string before splitting by separator
+        mapped_key = key.split(separator)  # Split the string key by the separator
+        mappings.append((index, mapped_key))
+    
+    # Convert the flattened values to a numpy array of float32, but skip non-numeric values
+    flattened_values = []
+    for value in flattened_dict.values():
+        if isinstance(value, (int, float)):  # Only include numeric types
+            flattened_values.append(value)
+        elif isinstance(value, dict):  # Skip dictionaries
+            flattened_values.append(0)  # Or set a default value for empty or nested dictionaries
+    
+    # Convert the valid numeric values to a numpy array
+    flattened_array = np.array(flattened_values).astype("float32")
+    
+    return flattened_array, mappings
+def build_optimization_model(env):
     regions = env.regions
     generators = env.generators
     transmission_lines = env.transmission_lines
@@ -103,4 +150,24 @@ def create_model(env):
     model.obj = Objective(rule=objective_rule, sense=maximize)
     return model
 
+def optimal_simulation(env, solver, tee: bool = True, raise_on_infeasible: bool = True):
+    m = build_optimization_model(env)
+    opt = solver if hasattr(solver, "solve") else SolverFactory(str(solver))
+    results = opt.solve(m, tee=tee)
 
+    term = results.solver.termination_condition
+    ok = term in (TerminationCondition.optimal, TerminationCondition.locallyOptimal)
+
+    if not ok and raise_on_infeasible:
+        raise RuntimeError(
+            f"Optimization did not solve to optimality. Termination condition: {term}"
+        )
+    actions = []
+    
+    for t in range(1,env.T+1):
+        action = {'addgen':{(i,r): 2*(m.add_gen[i,r,t].value-0)/(env.maxgen[i][r] - 0)-1 for i in env.generators for r in env.regions},
+                        'powflow':{l:2*(m.pow_flow[l,t].value + env.tlcap[l])/(env.tlcap[l] + env.tlcap[l])-1 for l in env.transmission_lines}}
+        action_flatt, mapp = flatten_and_track_mappings(action)
+        print(action_flatt)
+        actions.append(action_flatt)
+    return actions
