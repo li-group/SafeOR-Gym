@@ -1,7 +1,7 @@
 import os
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
-from register_cmdp import build_and_register_cmdp_env,safeor_make
+from register_cmdp import build_and_register_cmdp_env,safeor_make,find_key_by_inner_value
 from environments import Env_dict
 import importlib
 current_dir_name = os.path.dirname(os.path.abspath(__file__))
@@ -16,3 +16,6 @@ for (dir_name) in Env_dict.keys():
     if 'utils' in sys.modules:
         del sys.modules['utils']
 
+def optimal_simulation_actions(env_id):
+    dir_name = find_key_by_inner_value(Env_dict,env_id)
+    
