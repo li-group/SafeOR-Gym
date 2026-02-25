@@ -1,3 +1,4 @@
+# Run this benchmarking after installing the omnisafe version in https://github.com/li-group/omnisafe.git
 import os
 import sys
 import yaml
@@ -140,3 +141,4 @@ def main():
 if __name__ == "__main__":
     main()
     
+
