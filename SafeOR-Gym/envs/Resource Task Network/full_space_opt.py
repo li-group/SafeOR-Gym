@@ -1,7 +1,9 @@
 import json
+import numpy as np
 import pyomo.environ as po
+from pyomo.opt import SolverFactory, TerminationCondition
 
-def build_rtn_model(config_file: str, horizon: int):
+def build_optimisation_model(config_file: str, horizon: int):
     # 1) LOAD JSON
     with open(config_file, 'r') as f:
         data = json.load(f)
@@ -173,6 +175,103 @@ def build_rtn_model(config_file: str, horizon: int):
 
     return m#, R_dict, P_dict, IM_dict, J_dict
 
-model = build_rtn_model("hard_environment_data.json", horizon = 30)
-solver = po.SolverFactory('gurobi')
-results = solver.solve(model, tee = True)
+def optimal_simulation(env, solver, tee: bool = False, raise_on_infeasible: bool = True):
+    """
+    Solve the RTN Pyomo model and return the optimal action sequence for the whole horizon.
+
+    Parameters
+    ----------
+    env : RTNEnv
+        An instantiated environment (must have env.config_file, env.T, env.task_names,
+        env.min_batch, env.max_batch).
+    solver : str or pyomo.opt.base.solvers.OptSolver
+        Either a solver name (e.g. "gurobi", "cbc", "glpk") or a Pyomo solver instance.
+    tee : bool
+        If True, prints solver output.
+    raise_on_infeasible : bool
+        If True, raise an error when the model is not solved to optimality.
+
+    Returns
+    -------
+    raw_actions : np.ndarray, shape (T, num_tasks)
+        Actions in [-1, 1] suitable to pass directly into env.step(action).
+        (If a task is not run at time t, raw action is 0.0.)
+    batch_actions : np.ndarray, shape (T, num_tasks)
+        The corresponding optimal batch sizes E[i,t] (what the optimizer chose).
+    results : pyomo.opt.results.SolverResults
+        The solver results object.
+    """
+    horizon = int(env.T)
+    m = build_optimisation_model(env.config_file, horizon)
+
+    opt = solver if hasattr(solver, "solve") else SolverFactory(str(solver))
+    results = opt.solve(m, tee=tee)
+
+    term = results.solver.termination_condition
+    ok = term in (TerminationCondition.optimal, TerminationCondition.locallyOptimal)
+
+    if not ok and raise_on_infeasible:
+        raise RuntimeError(
+            f"Optimization did not solve to optimality. Termination condition: {term}"
+        )
+
+    # 2) Establish a consistent task order that matches the env action vector
+    # env.task_names is built from tasks_dict.keys() in RTNEnv.__init__ (dict order preserved).
+    task_names = list(env.task_names)
+    num_tasks = len(task_names)
+
+    # 3) Extract optimal batch sizes from Pyomo: E[i,t]
+    # IMPORTANT: m.I is a Pyomo Set; to avoid ordering issues, we index by task name explicitly.
+    batch_actions = np.zeros((horizon, num_tasks), dtype=np.float32)
+
+    for t in range(1, horizon + 1):
+        for k, task in enumerate(task_names):
+            # If model didn't include task for some reason, keep 0
+            if task not in m.I:
+                batch_actions[t - 1, k] = 0.0
+                continue
+
+            e_val = po.value(m.E[task, t])
+            if e_val is None:
+                e_val = 0.0
+
+            # Numerically clean tiny values
+            if abs(e_val) < 1e-8:
+                e_val = 0.0
+
+            batch_actions[t - 1, k] = float(e_val)
+
+    # 4) Convert batch sizes to raw actions in [-1,1] so env scaling reproduces them:
+    # scaled = 0.5*(raw + 1)*(max-min) + min  =>  raw = 2*(scaled-min)/(max-min) - 1
+    min_b = np.asarray(env.min_batch, dtype=np.float32)
+    max_b = np.asarray(env.max_batch, dtype=np.float32)
+    denom = (max_b - min_b)
+
+    raw_actions = np.zeros_like(batch_actions, dtype=np.float32)
+
+    for t in range(horizon):
+        for k in range(num_tasks):
+            b = batch_actions[t, k]
+
+            # Your env treats abs(raw) <= 1e-3 as "task not initiated".
+            # So if optimizer says batch=0, set raw=0 (this bypasses scaling).
+            if b <= 0.0:
+                raw_actions[t, k] = 0.0
+                continue
+
+            # Guard against zero range (shouldn't happen, but safe)
+            if denom[k] <= 1e-12:
+                raw_actions[t, k] = 0.0
+                continue
+
+            r = 2.0 * (b - min_b[k]) / denom[k] - 1.0
+            # Clip to [-1,1] to be safe w.r.t. numerical issues
+            raw_actions[t, k] = float(np.clip(r, -1.0, 1.0))
+
+            # Extra safety: avoid accidentally being treated as "inactive"
+            if abs(raw_actions[t, k]) <= 1e-3:
+                # If batch is positive but raw is near zero due to min/max weirdness,
+                # nudge slightly away from 0.
+                raw_actions[t, k] = 0.01 if raw_actions[t, k] >= 0 else -0.01
+
+    return raw_actions

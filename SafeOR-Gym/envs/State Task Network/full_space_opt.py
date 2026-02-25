@@ -1,5 +1,7 @@
 import json
+import numpy as np
 import pyomo.environ as po
+from pyomo.opt import SolverFactory, TerminationCondition
 
 def build_optimization_model(config_file: str, horizon: int) -> po.ConcreteModel:
     # 1) LOAD JSON
@@ -187,7 +189,103 @@ def build_optimization_model(config_file: str, horizon: int) -> po.ConcreteModel
     
     return m #, R_dict, P_dict, IM_dict, J_dict
 
+def optimal_simulation(env, solver, tee: bool = False, raise_on_fail: bool = True):
+    """
+    Solve the STN Pyomo model and return the optimal flattened action sequence.
 
-model = build_optimization_model("hard_environment_data.json", horizon = 30)
-solver = po.SolverFactory('gurobi')
-results = solver.solve(model, tee = True)
+    Parameters
+    ----------
+    env : STNEnv
+        Must have: env.config_file, env.T, env.task_names, env.equipments,
+                   env.min_batch (num_tasks x num_eq), env.max_batch (num_tasks x num_eq).
+    solver : str or Pyomo solver instance
+        e.g. "gurobi", "cbc", "glpk" or an OptSolver with .solve(...)
+    tee : bool
+        Print solver output.
+    raise_on_fail : bool
+        Raise if not optimal.
+
+    Returns
+    -------
+    raw_actions_flat : np.ndarray of shape (T, num_tasks*num_eq)
+        Actions in [-1,1] to feed directly to env.step(raw_actions_flat[t]).
+    batch_actions_mat : np.ndarray of shape (T, num_tasks, num_eq)
+        Batch sizes placed on the chosen equipment column per task.
+    results : SolverResults
+        Pyomo results object.
+    """
+    horizon = int(env.T)
+    m = build_optimization_model(env.config_file, horizon)
+
+    opt = solver if hasattr(solver, "solve") else SolverFactory(str(solver))
+    results = opt.solve(m, tee=tee)
+
+    term = results.solver.termination_condition
+    ok = term in (TerminationCondition.optimal, TerminationCondition.locallyOptimal)
+    if (not ok) and raise_on_fail:
+        raise RuntimeError(f"Optimization did not solve to optimality. Termination: {term}")
+
+    task_names = list(env.task_names)
+    eq_names = list(env.equipments)
+    num_tasks = len(task_names)
+    num_eq = len(eq_names)
+
+    # Build mapping: each task -> (single) equipment used in the Pyomo model.
+    # Your build_optimization_model picks: eq = next(iter(tasks[i]['equipments'].values()))
+    # We recover that from the env's loaded tasks_dict to ensure consistent mapping.
+    task_to_eq_idx = {}
+    for i, task in enumerate(task_names):
+        eq_used = next(iter(env.tasks_dict[task]["equipments"].values()))
+        task_to_eq_idx[task] = eq_names.index(eq_used)
+
+    # Extract optimal E[i,t] and place it into the corresponding (task, eq_used) entry.
+    batch_actions_mat = np.zeros((horizon, num_tasks, num_eq), dtype=np.float32)
+
+    for t in range(1, horizon + 1):
+        for i, task in enumerate(task_names):
+            if task not in m.I:
+                continue
+            e_val = po.value(m.E[task, t])
+            if e_val is None or abs(e_val) < 1e-8:
+                e_val = 0.0
+
+            eq_idx = task_to_eq_idx[task]
+            batch_actions_mat[t - 1, i, eq_idx] = float(e_val)
+
+    # Convert batch sizes -> raw actions in [-1,1] with env's per-(task,equip) min/max.
+    min_b = np.asarray(env.min_batch, dtype=np.float32)  # (num_tasks, num_eq)
+    max_b = np.asarray(env.max_batch, dtype=np.float32)  # (num_tasks, num_eq)
+    denom = (max_b - min_b)
+
+    raw_actions_mat = np.zeros_like(batch_actions_mat, dtype=np.float32)
+
+    for t in range(horizon):
+        for i in range(num_tasks):
+            for e in range(num_eq):
+                b = batch_actions_mat[t, i, e]
+
+                # If optimizer didn't select this (task,equip), keep it inactive:
+                if b <= 0.0:
+                    raw_actions_mat[t, i, e] = 0.0
+                    continue
+
+                # Safety: avoid division by zero if min=max (shouldn't happen but protect anyway)
+                if denom[i, e] <= 1e-12:
+                    raw_actions_mat[t, i, e] = 0.0
+                    continue
+
+                r = 2.0 * (b - min_b[i, e]) / denom[i, e] - 1.0
+                r = float(np.clip(r, -1.0, 1.0))
+
+                # Avoid being interpreted as "inactive" by sanitize_action's threshold
+                if abs(r) <= 1e-3:
+                    r = 0.01 if r >= 0 else -0.01
+
+                raw_actions_mat[t, i, e] = r
+
+    # Flatten in the same order as unflatten_action_vector expects.
+    # Given your use: unflatten_action_vector(action, num_tasks, len(equipments)),
+    # the natural assumption is row-major reshape: (num_tasks*num_eq,) -> (num_tasks, num_eq)
+    raw_actions_flat = raw_actions_mat.reshape(horizon, num_tasks * num_eq)
+
+    return raw_actions_flat
