@@ -13,9 +13,9 @@ import argparse
 import copy
 import json, torch
 from pyomo.environ import *
-#from utils import *
+
 from pyomo.opt import SolverFactory, TerminationCondition
-import SafeOR_Gym
+
 def flatten_dict(dictionary, parent_key='', separator=';'):
     items = []
     for key, value in dictionary.items():
@@ -344,3 +344,4 @@ def optimal_simulation(env, solver, tee: bool = True, raise_on_infeasible: bool 
         print(action_flatt)
         actions.append(action_flatt)
     return actions
+
