@@ -142,10 +142,9 @@ class BlendEnv(gym.Env):
         
         self.window_len = 2
         self.T = 6
-        self.action_sample_file = "Multiperiod Blending Problem(BlendingEnv)/data/action_sample_simple_blend.json"
-        self.connections_file = "Multiperiod Blending Problem(BlendingEnv)/data/connections_simple_blend.json"
-        
         self.config_file = kwargs.get('config_file', '')
+        self.action_sample = {}
+        self.connections = {}
         try:
             with open(self.config_file ,"r") as f:
                 env_config_read = f.read()
@@ -157,12 +156,8 @@ class BlendEnv(gym.Env):
         except Exception as e:
             print(f"File not read: {e}")
             print("Using default values")
-        with open(self.action_sample_file ,"r") as f:
-            action = f.read()
-        self.action_sample = json.loads(action)
-        with open(self.connections_file,"r") as f:
-            connections_s = f.readline()
-        self.connections = json.loads(connections_s)
+        print(self.action_sample)
+        print(self.connections)
         self.sources, self.blenders, self.demands = get_sbp(self.connections)
         self.properties = list(self.sigma[self.sources[0]].keys())
         self.reset() # sets state, reward, t, done
