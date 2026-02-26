@@ -488,7 +488,7 @@ Pattern:
 import numpy as np
 from pyomo.environ import value
 
-def optimal_simulation(env, solver_name='gurobi', tee=False):
+def optimal_simulation(env, solver_name='gurobi', tee=False, raise_on_infeasible:bool =True):
     """
     Solve the ASU scheduling problem optimally day-by-day using a rolling
     horizon Pyomo model and return the action sequence that can be fed into
