@@ -488,7 +488,7 @@ Pattern:
 import numpy as np
 from pyomo.environ import value
 
-def optimal_simulation(env, optimizer, solver_name='gurobi', tee=False):
+def optimal_simulation(env, solver_name='gurobi', tee=False):
     """
     Solve the ASU scheduling problem optimally day-by-day using a rolling
     horizon Pyomo model and return the action sequence that can be fed into
@@ -518,6 +518,15 @@ def optimal_simulation(env, optimizer, solver_name='gurobi', tee=False):
     raw_actions = np.zeros((total_hours, action_dim), dtype=np.float32)
     rewards = []
     costs = []
+
+    base_dir = Path().resolve()
+    opt_config_fp = base_dir / "asuopt_config.json"
+    if not opt_config_fp.is_file():
+      raise FileNotFoundError(f"Couldn’t find config.json at {opt_config_fp}")
+    
+    env_id = 'ASU1'
+    env_lookahead = env._get_lookahead_days()
+    optimizer = optimize_ASU(env_id, lookahead=env_lookahead, config_path=opt_config_fp)
 
     for day in range(num_days):
         # --- 1. Get current environment state ---
@@ -576,7 +585,8 @@ def optimal_simulation(env, optimizer, solver_name='gurobi', tee=False):
         if term_flag:
             break
 
-    return raw_actions, rewards, costs
+   #  return raw_actions, rewards, costs
+    return raw_actions
 
 
 def replay_actions(env, raw_actions):
