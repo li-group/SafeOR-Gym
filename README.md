@@ -104,7 +104,7 @@ This repository uses `ExperimentGrid` to manage and evaluate SafeRL training exp
 ---
 
 ###  Benchmarking Code
-
+For the following, we use a modified [version](https://github.com/li-group/omnisafe/tree/main) of Omnisafe.
 ```python
 eg = ExperimentGrid(exp_name='Benchmark_Safety_rtn_v0')
 
