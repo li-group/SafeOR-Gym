@@ -89,7 +89,7 @@ Each environment has its own folder containing the relevant code. To run and ben
 
 ## Benchmarking Setup (ExperimentGrid)
 
-This repository uses `ExperimentGrid` to manage and evaluate SafeRL training experiments. Below is an overview of its key functionality and a sample code block for running benchmarks.
+For bencharmarking, we use a modified [version](https://github.com/li-group/omnisafe/tree/main) of Omnisafe with the core algorithm implementations retained. This repository uses `ExperimentGrid` to manage and evaluate SafeRL training experiments. Below is an overview of its key functionality and a sample code block for running benchmarks.
 
 ### Key Features
 
@@ -104,7 +104,7 @@ This repository uses `ExperimentGrid` to manage and evaluate SafeRL training exp
 ---
 
 ###  Benchmarking Code
-For the following, we use a modified [version](https://github.com/li-group/omnisafe/tree/main) of Omnisafe.
+
 ```python
 eg = ExperimentGrid(exp_name='Benchmark_Safety_rtn_v0')
 
