@@ -136,6 +136,7 @@ class STNEnv(gym.Env):
         """
 
         # Set up debug flag and logger.
+        self.env_id = env_id
         self.config_file = kwargs.get('config_file')        
         self.debug = kwargs.get('debug', False)
         self.sanitization_cost_weight = kwargs.get('sanitization_cost_weight', 1.0)
