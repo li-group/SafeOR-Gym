@@ -16,7 +16,7 @@ The key contributions of this project:
 ## Table of Contents
 
 - [Installation](#installation)
-- [Quick Start](#quick-start)
+- [Usage](#usage)
 - [Environments](#environments)
 - [Benchmarking Setup (ExperimentGrid)](#benchmarking-setup-experimentgrid)
 - [Cite us](#cite-us)
@@ -35,13 +35,27 @@ The key contributions of this project:
 
 ### Install
 
-Simply run the bash file requirements.sh. The file can be modified to change the environment name or use any other package manager.
-
 ```bash
-bash requirements.sh
+git clone https://github.com/li-group/SafeOR-Gym.git
+cd SafeOR-Gym
+pip install -e .
 ```
-Note: This repository uses a modified [version](https://github.com/li-group/omnisafe/tree/main) of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
+Note: This benchmarking part of the repository uses a modified [version](https://github.com/li-group/omnisafe/tree/main) of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
+## Usage
+The package models SafeRL Environments as CMDP classes (similar to gym). Creating environment instances is very simple: 
 
+```python
+import SafeOR_Gym
+env_rtn = SafeOR_Gym.safeor_make('rtn-v0')
+#If required a config file can be added
+env_stn = SafeOR_Gym.safeor_make('stn-v0',config_file_path) 
+```
+The environment can be then be used with other SafeRL libraries that accept CMDP classes. Furthermore importing the package automatically adds the env-id to the Omnisafe registry making it easy to access Omnisafe algorithms. 
+To help researchers we also have a function optimal_simulation_actions for our environments which provides optimal actions for the entire horion starting from the first time period in the format [T,action_size]: 
+```python
+import SafeOR_Gym
+actions = SafeOR_Gym.optimal_simulation_actions(env,'gurobi')
+```
 ## Environments
 
 - **Production Scheduling in Air Separation Unit (ASUEnv)**: Optimize liquid production to minimize electricity and production costs, while fulfilling demand and respecting unit capacities across time.
@@ -148,14 +162,13 @@ eg.run(train, num_pool = 1, gpu_id=gpu_id)
 eg.analyze(parameter='algo', values = None, compare_num = 5)
 a = eg.evaluate(num_episodes = 10)
 ```
-All benchmarking experiments can be executed using main.py. The script exposes configurable parameters through command-line arguments, allowing flexible evaluation across environments and algorithms. Below is the structure of the command
+All benchmarking experiments can be executed using main.py in the Benchmarking folder. The script exposes configurable parameters through command-line arguments, allowing flexible evaluation across environments and algorithms. Below is the structure of the command
 ```
 python main.py \
   --dir_name "<ENV_DIRECTORY>" \
   --env_id <ENV_ID> \
   --environment_config_file_path "<CONFIG_PATH>" \
   --steps_per_epoch <STEPS> \
-  --T <HORIZON> \
   --total_epochs <EPOCHS> \
   --output_activation_function <ACTIVATION> \
   --seed <SEED> \

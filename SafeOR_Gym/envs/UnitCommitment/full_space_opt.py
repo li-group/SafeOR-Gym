@@ -1,5 +1,6 @@
 import numpy as np
 import pyomo.environ as pe
+from pyomo.opt import SolverFactory, TerminationCondition
 
 
 def create_model(env):
@@ -268,3 +269,76 @@ def create_model(env):
 
 
 
+def optimal_simulation(env, solver, tee: bool = False, raise_on_infeasible: bool = True):
+    """Solve the UC Pyomo model and return the optimal action sequence for the horizon."""
+    horizon = int(env.T)
+    m = create_model(env)
+
+    opt = solver if hasattr(solver, "solve") else SolverFactory(str(solver))
+    results = opt.solve(m, tee=tee)
+
+    term = results.solver.termination_condition
+    ok = term in (TerminationCondition.optimal, TerminationCondition.locallyOptimal)
+    if (not ok) and raise_on_infeasible:
+        raise RuntimeError(
+            f"Optimization did not solve to optimality. Termination condition: {term}"
+        )
+
+    num_gen = env.num_gen
+    num_bus = env.num_bus
+    include_angle = num_bus > 1
+
+    u = np.zeros((horizon, num_gen), dtype=np.float32)
+    p = np.zeros((horizon, num_gen), dtype=np.float32)
+    pi = np.zeros((horizon, num_bus), dtype=np.float32) if include_angle else None
+
+    for t in range(1, horizon + 1):
+        t_idx = t - 1
+        for i in range(num_gen):
+            u_val = pe.value(m.u[t, i])
+            p_val = pe.value(m.p[t, i])
+            u[t_idx, i] = 0.0 if u_val is None else float(u_val)
+            p[t_idx, i] = 0.0 if p_val is None else float(p_val)
+        if include_angle:
+            for n in range(num_bus):
+                pi_val = pe.value(m.pi[t, n])
+                pi[t_idx, n] = 0.0 if pi_val is None else float(pi_val)
+
+    if env.scale_action:
+        raw_on_off = (u >= 0.5).astype(np.float32) * 2.0 - 1.0
+
+        p_min = np.asarray(env.P_min, dtype=np.float32)
+        p_max = np.asarray(env.P_max, dtype=np.float32)
+        denom_p = p_max - p_min
+        safe_denom_p = np.where(denom_p > 1e-12, denom_p, 1.0)
+        raw_power = 2.0 * (p - p_min) / safe_denom_p - 1.0
+        raw_power = np.clip(raw_power, -1.0, 1.0).astype(np.float32)
+        raw_power[:, denom_p <= 1e-12] = 0.0
+
+        if include_angle:
+            pi_min = np.asarray(env.Pi_min, dtype=np.float32)
+            pi_max = np.asarray(env.Pi_max, dtype=np.float32)
+            denom_pi = pi_max - pi_min
+            safe_denom_pi = np.where(denom_pi > 1e-12, denom_pi, 1.0)
+            raw_pi = 2.0 * (pi - pi_min) / safe_denom_pi - 1.0
+            raw_pi = np.clip(raw_pi, -1.0, 1.0).astype(np.float32)
+            raw_pi[:, denom_pi <= 1e-12] = 0.0
+            angle_actions = raw_pi[:, 1:]
+    else:
+        raw_on_off = u
+        raw_power = p
+        if include_angle:
+            angle_actions = pi[:, 1:]
+
+    if include_angle:
+        action_dim = 2 * num_gen + (num_bus - 1)
+    else:
+        action_dim = 2 * num_gen
+
+    raw_actions = np.zeros((horizon, action_dim), dtype=np.float32)
+    raw_actions[:, :num_gen] = raw_on_off
+    raw_actions[:, num_gen:2 * num_gen] = raw_power
+    if include_angle:
+        raw_actions[:, 2 * num_gen:] = angle_actions
+
+    return raw_actions

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple, Type, List
+from pathlib import Path
 import random
 import torch
 
@@ -31,6 +32,8 @@ import torch as th
 import yaml
 import os
 import numpy as np
+from environments import Env_dict
+_PKG_ROOT = Path(__file__).resolve().parent  # .../SafeOR_Gym
 _CMDP_CLASS_BY_ENV_ID: Dict[str, Type] = {}
 
 def build_and_register_cmdp_env(
@@ -128,8 +131,13 @@ def build_and_register_cmdp_env(
         _CMDP_CLASS_BY_ENV_ID[_eid] = registered_class
     return registered_class
 
-
-def safeor_make(env_id: str, config_file: str, **kwargs):
+def find_key_by_inner_value(dictionary, g):
+    for key, value in dictionary.items():
+        if len(value) > 1 and isinstance(value[1], list):
+            if g in value[1]:
+                return key
+    return None
+def safeor_make(env_id: str, config_file: str | None = None, **kwargs):
     """
     Instantiate the registered CMDP wrapper for env_id, passing config_file down
     into base env via env_init_cfgs.
@@ -141,7 +149,17 @@ def safeor_make(env_id: str, config_file: str, **kwargs):
             f"No CMDP registered for env_id='{env_id}'. "
             f"Did you import SafeOR_Gym (or otherwise call build_and_register_cmdp_env) first?"
         ) from e
+    if config_file is None:
+        dir_name = find_key_by_inner_value(Env_dict,env_id)
+        if dir_name is None:
+            raise ValueError(
+                f"No default config mapping found for env_id='{env_id}'. "
+                f"Please pass config_file explicitly."
+            )
 
+        # Env_dict[dir_name] is like [a, [b, c], d] -> take d as the filename
+        cfg_name = Env_dict[dir_name][2]
+        config_file = str(_PKG_ROOT / "envs" / dir_name / cfg_name)
     env_init_cfgs = kwargs.pop("env_init_cfgs", {}) or {}
     env_init_cfgs = {"config_file": config_file, **env_init_cfgs}
 
