@@ -29,16 +29,20 @@ The key contributions of this project:
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.10
 - PyTorch ≥ 1.10
 - (Optional) Gurobi / CPLEX for optimization
 
 ### Install
 
 ```bash
+conda create -n safeorenv python=3.10
+conda activate safeorenv
 git clone https://github.com/li-group/SafeOR-Gym.git
 cd SafeOR-Gym
 pip install -e .
+pip uninstall -y numpy pandas
+pip install numpy pandas
 ```
 Note: This benchmarking part of the repository uses a modified [version](https://github.com/li-group/omnisafe/tree/main) of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
 ## Usage
@@ -85,7 +89,7 @@ Each environment has its own folder containing the relevant code. To run and ben
 
 ## Benchmarking Setup (ExperimentGrid)
 
-This repository uses `ExperimentGrid` to manage and evaluate SafeRL training experiments. Below is an overview of its key functionality and a sample code block for running benchmarks.
+For bencharmarking, we use a modified [version](https://github.com/li-group/omnisafe/tree/main) of Omnisafe with the core algorithm implementations retained. This repository uses `ExperimentGrid` to manage and evaluate SafeRL training experiments. Below is an overview of its key functionality and a sample code block for running benchmarks.
 
 ### Key Features
 
