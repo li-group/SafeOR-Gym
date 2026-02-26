@@ -98,7 +98,7 @@ class InvMgmtEnv(gym.Env):
         "j_out": dict
     }
 
-    def __init__(self, env_id: str = 'InvMgmt-v0', **kwargs):
+    def __init__(self, env_id: str = 'SupplyChain-v0', **kwargs):
         """
         Initialize the environment by setting defaults, applying environment configuration, resetting to the initial state, and
         building action and observation spaces.
@@ -659,7 +659,7 @@ class InvMgmtEnv(gym.Env):
         self.reward = reward - backlog_pen
         self.reward_ep += self.reward
         self.cost = cost
-        self.cost += self.cost
+        self.cost_ep += self.cost
 
         # 10) summary stats
         self.pens_step['num_steps']         += 1
@@ -678,7 +678,7 @@ class InvMgmtEnv(gym.Env):
 
         flat_obs = self.flatt_state  # numpy 1-D array
         obs_tensor   = th.tensor(flat_obs,   dtype=th.float32, device=self._device)
-        reward_tensor= th.tensor(reward - cost , dtype=th.float32, device=self._device)
+        reward_tensor= th.tensor(reward  - cost , dtype=th.float32, device=self._device)
         done_tensor  = th.tensor(self.terminated, dtype=th.bool,   device=self._device)
         trunc_tensor = th.tensor(self.truncated,  dtype=th.bool,   device=self._device)
 
