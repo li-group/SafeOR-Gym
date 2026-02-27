@@ -575,9 +575,14 @@ class STNEnv(gym.Env):
         available_to_fulfill = np.clip(prod_inventory - min_inventory, a_min = 0.0, a_max = None)
 
         # Calculate revenue from fulfilled demand
-        for idx, prod in enumerate(self.products):
-            units_sold = min(available_to_fulfill[idx], -current_demand[idx])
+        sales = np.zeros(len(self.products), dtype=np.float32)
+        for k, prod in enumerate(self.products):
+            units_sold = min(available_to_fulfill[k], -current_demand[k])
+            sales[k] = units_sold
             revenue += units_sold * product_price.get(prod)
+
+        for k, inv_idx in enumerate(product_indices):
+            new_inventory[inv_idx] -= sales[k]
 
         # Utility cost of executing the action
         utility_cost = self._compute_utility_cost(action)
@@ -587,12 +592,14 @@ class STNEnv(gym.Env):
         unmet_penalty = sum(1.5 * unmet_demand[i] * product_price.get(prod) for i, prod in enumerate(self.products))
         
         reactant_penalty = 0.0
-        for idx, r in enumerate(self.reactants):
+        for r in self.reactants:
             inv_idx = self.resources.index(r)
             deficit = -min(new_inventory[inv_idx], 0.0)  # Only if below zero
             if deficit > 0:
                 price = self.raws_dict[r]['cost']  # Cost of buying that reactant
                 reactant_penalty += deficit * price
+                new_inventory[inv_idx] = 0.0
+
 
         reward = revenue - utility_cost - unmet_penalty + reactant_penalty
     
@@ -618,6 +625,8 @@ class STNEnv(gym.Env):
 
         """
         scaled_action = 0.5 * (raw_action + 1.0) * (self.max_batch - self.min_batch) + self.min_batch
+        scaled_action[scaled_action <= 1e-3] = 0.0
+        
         if not isinstance(sanitized_action, torch.Tensor):
             sanitized_action = torch.from_numpy(sanitized_action)
         if not isinstance(scaled_action, torch.Tensor):
@@ -694,6 +703,8 @@ class STNEnv(gym.Env):
         duplicate_inventory = self.inventory.copy()
 
         scaled_action = 0.5 * (raw_action + 1.0) * (self.max_batch - self.min_batch) + self.min_batch
+        inactive = scaled_action <= 1e-3
+        scaled_action[inactive] = 0.0
         self.logger.debug(f'---- Scaled action: {scaled_action} ----')
         
         candi_action = np.zeros_like(scaled_action)
@@ -706,7 +717,7 @@ class STNEnv(gym.Env):
                 raw_batch = raw_action[i, e]
 
                 # raw action is nearly 0.
-                if np.abs(raw_batch) <= 1e-3:
+                if np.abs(scaled_batch) <= 1e-3:
                     continue
 
                 stoich = self.task_stoichs[i]
@@ -742,7 +753,7 @@ class STNEnv(gym.Env):
         # First pass: equipment feasibility using current inventory
         for i in range(self.num_tasks):
             for e, equip in enumerate(self.equipments):
-                if not scaled_action[i, e]:
+                if candi_action[i, e] <= 1e-8:
                     continue
                 
                 if duplicate_inventory[self.resources.index(equip)] <= 0:

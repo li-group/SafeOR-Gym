@@ -553,24 +553,30 @@ class RTNEnv(gym.Env):
         available_to_fulfill = np.clip(prod_inventory - min_inventory, a_min = 0.0, a_max = None)
 
         # Calculate revenue from fulfilled demand
-        for idx, prod in enumerate(self.products):
-            units_sold = min(available_to_fulfill[idx], -current_demand[idx])
+        sales = np.zeros(len(self.products), dtype=np.float32)
+        for k, prod in enumerate(self.products):
+            units_sold = min(available_to_fulfill[k], -current_demand[k])
+            sales[k] = units_sold
             revenue += units_sold * product_price.get(prod)
+        
+        for k, inv_idx in enumerate(product_indices):
+            new_inventory[inv_idx] -= sales[k]
 
         # Utility cost of executing the action
         utility_cost = self._compute_utility_cost(action)
 
         # Unmet demand = total demand - fulfilled amount
         unmet_demand = -current_demand - np.minimum(-current_demand, available_to_fulfill)
-        unmet_penalty = sum(1.5 * unmet_demand[i] * product_price.get(prod) for i, prod in enumerate(self.products)) # 1.5 is a tunable penalty coefficient
+        unmet_penalty = sum(1.5 * unmet_demand[i] * product_price.get(prod) for i, prod in enumerate(self.products))
 
         reactant_penalty = 0.0
-        for idx, r in enumerate(self.reactants):
+        for r in self.reactants:
             inv_idx = self.resources.index(r)
             deficit = -min(new_inventory[inv_idx], 0.0)  # Only if below zero
             if deficit > 0:
                 price = self.raws_dict[r]['cost']  # Cost of buying that reactant
                 reactant_penalty += deficit * price
+                new_inventory[inv_idx] = 0.0
 
         reward = revenue - utility_cost - unmet_penalty + reactant_penalty
         
@@ -668,6 +674,8 @@ class RTNEnv(gym.Env):
         
         self.logger.debug('---- Sanitising action ----')
         scaled_action = 0.5 * (raw_action + 1.0) * (self.max_batch - self.min_batch) + self.min_batch
+        inactive = scaled_action <= 1e-3
+        scaled_action[inactive] = 0.0
         self.logger.debug(f'---- Scaled action: {scaled_action} ----')
         
         candi_action = np.zeros_like(scaled_action)
@@ -678,7 +686,7 @@ class RTNEnv(gym.Env):
             scaled_batch = scaled_action[i]
             raw_batch = raw_action[i]
 
-            if np.abs(raw_batch) <= 1e-3:
+            if np.abs(scaled_batch) <= 1e-3:
                 continue
 
             stoich = self.task_stoichs[i]
@@ -712,7 +720,10 @@ class RTNEnv(gym.Env):
         self.logger.debug(f'---- Action after inv based sanitization : {candi_action} ----')
 
         # First pass: equipment feasibility using current inventory
-        for i in range(self.num_tasks):            
+        for i in range(self.num_tasks):
+            if candi_action[i] <= 1e-8:
+                continue
+
             equip_ids = self.task_equipments[i]
             if any(duplicate_inventory[self.resources.index(e)] <= 0 for e in equip_ids):
                 self.env_spec_log["Penalties/equip_lb"] += 1
@@ -748,13 +759,12 @@ class RTNEnv(gym.Env):
         sanitized_action = self.sanitize_action(action)
         self.logger.debug(f'---- Final sanitized action: {sanitized_action} ----')
         sanit_cost = self._compute_sanitization_cost(action, sanitized_action)
-
+        
         #_, reward, cost, terminated, truncated = self._transition(sanitized_action)
 
         
         # Start with the current inventory
         new_inventory = self.inventory.copy()
-
         new_inventory = self._update_scheduled_products(new_inventory, sanitized_action)
 
         # Calculate change of each resource
@@ -768,14 +778,14 @@ class RTNEnv(gym.Env):
         feasible = inv_ok 
 
         if not feasible:
-            self.cost = self._compute_cost(self.inventory)
+            self.cost = self._compute_cost(new_inventory)
             self.reward = self._compute_reward(new_inventory, sanitized_action)  # Heavy penalty.
             truncated = False
             new_inventory = self._update_fix_inventory(new_inventory) # Bound the inventories between lower and upper bounds.
         else:
             # For each executed task, update equipment consumption.
            
-                # For every equipment required, consume one unit immediately.
+            # For every equipment required, consume one unit immediately.
             for i, batch in enumerate(sanitized_action):
                 if batch == 0:
                     continue
