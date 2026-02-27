@@ -36,6 +36,38 @@ from environments import Env_dict
 _PKG_ROOT = Path(__file__).resolve().parent  # .../SafeOR_Gym
 _CMDP_CLASS_BY_ENV_ID: Dict[str, Type] = {}
 
+    
+def package_root() -> Path:
+    """Absolute path to the SafeOR_Gym package directory."""
+    return Path(__file__).resolve().parent
+
+
+def get_default_config_path(env_id: str) -> Path:
+    """
+    Return the default config file path (as a Path) for a given env_id.
+    """
+    dir_name = find_key_by_inner_value(Env_dict, env_id)
+    if dir_name is None:
+        raise ValueError(
+            f"No default config mapping found for env_id='{env_id}'. "
+            f"Please pass environment_config_file_path explicitly."
+        )
+
+    cfg_name = Env_dict[dir_name][2]
+    return package_root() / "envs" / dir_name / cfg_name
+
+
+def resolve_config_path(env_id: str, config_file: Optional[str | Path] = None) -> Path:
+    """
+    If config_file is provided, return it as an absolute Path (relative paths resolved from CWD).
+    Otherwise return the package default for env_id.
+    """
+    if config_file is None:
+        return get_default_config_path(env_id)
+    return Path(config_file).expanduser().resolve()
+
+
+
 def build_and_register_cmdp_env(
     *,
     base_env_cls: Type,                 # e.g., ASUEnv
@@ -65,7 +97,7 @@ def build_and_register_cmdp_env(
             )
 
             # Underlying env gets env_init_cfgs dict merged in
-            env_init_cfgs = kwargs.get("env_init_cfgs", {}) or {}
+            env_init_cfgs = kwargs.get("env_init_cfgs", {'config_file':resolve_config_path(support_envs[0])}) or {}
             self._env = base_env_cls(env_id=env_id, **env_init_cfgs)
 
             self._action_space = self._env.action_space
