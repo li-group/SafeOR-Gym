@@ -95,7 +95,23 @@ class InvMgmtEnv(gym.Env):
         "inv_capacity": dict,
         "reordering_route_capacity": dict,
         "j_in": dict,
-        "j_out": dict
+        "j_out": dict,
+        "delta": dict,
+        "products": list,
+        "fixed_cost": list,
+        "dynamic_cost": list,
+        "gamma": dict,
+        "y_i": dict,
+        "IV_i": dict,
+        "IV_u": dict,
+        "IV_l": dict,
+        "IV_f": dict,
+        "theta_minon": list,
+        "theta_minoff": list,
+        "theta_startup": list,
+        "total_hours": list,
+        "interval_hours": list,
+        "z_history": dict
     }
 
     def __init__(self, env_id: str = 'SupplyChain-v0', **kwargs):
