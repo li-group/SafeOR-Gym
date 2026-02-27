@@ -75,17 +75,17 @@ actions = SafeOR_Gym.optimal_simulation_actions(env,'gurobi')
 
 Each environment has its own folder containing the relevant code. To run and benchmark an environment, execute the corresponding script located within its folder.
 
-| Environment                                  | Main Script File                  |
-|--------------------------------------------  |-----------------------------------|
-| Production Scheduling in Air Separation Unit | `ASU_safe.py`                     |
-| Generation & Transmission Expansion          | `gen_transmission_exp_safe.py`    |
-| Grid Integrated Energy Storage               | `battery_env_safe.py`             |
-| Integrated Scheduling and Maintenance        | `ISM_safe.py`                     |
-| Multi-Echelon Supply Chain                   | `supply_chain_safe.py`            |
-| MultiPeriod Blending                         | `Blending_safe.py`                |
-| Resource Task Network                        | `main.py`                         |
-| State Task Network                           | `main.py`                         |
-| Unit Commitment                              | `Unit_Commitment_Safe.py`         |
+| Environment                                   | env_id(s)                |
+|-----------------------------------------------|--------------------------|
+| Production Scheduling in Air Separation Unit | `ASU1`                   |
+| Generation & Transmission Expansion          | `Capacity-Expansion`     |
+| Grid Integrated Energy Storage               | `Battery-v0`             |
+| Integrated Scheduling and Maintenance        | `GASU-v0`, `GASU-v1`     |
+| Multi-Echelon Supply Chain                   | `SupplyChain-v0`         |
+| MultiPeriod Blending                         | `Blending-simple`        |
+| Resource Task Network                        | `rtn-v0`                 |
+| State Task Network                           | `stn-v0`                 |
+| Unit Commitment                              | `UC-v0`, `UC-v1`         |
 
 ## Benchmarking Setup (ExperimentGrid)
 
