@@ -465,3 +465,159 @@ class optimize_ASU:
       plt.grid()
       plt.show()
 
+   
+
+"""
+Optimal Simulation for ASU Environment
+
+This function bridges the ASU Gym environment and the Pyomo optimizer,
+analogous to how optimal_simulation bridges UnitCommitmentMasterEnv and the UC Pyomo model.
+
+Pattern:
+    1. Reset the environment to get initial state
+    2. For each day in the simulation horizon:
+        a. Get the current state from the environment
+        b. Update the optimizer's mutable parameters with this state
+        c. Solve the (1+lookahead)-day optimization problem
+        d. Extract the optimal lambda actions for the first 24 hours (day 1)
+        e. Step through the environment hour-by-hour using those actions
+        f. Update the optimizer's internal parameters (inventory, mode, switch history)
+    3. Return the full action sequence for replay / benchmarking
+"""
+
+import numpy as np
+from pyomo.environ import value
+
+def optimal_simulation(env, solver_name='gurobi', tee=False, raise_on_infeasible:bool =True):
+    """
+    Solve the ASU scheduling problem optimally day-by-day using a rolling
+    horizon Pyomo model and return the action sequence that can be fed into
+    the environment.
+
+    Args:
+        env: An ASUEnv instance (already constructed with config).
+        optimizer: An optimize_ASU instance (already constructed with the same config).
+        solver_name: Solver to use (default 'gurobi').
+        tee: Whether to print solver output.
+
+    Returns:
+        raw_actions: np.ndarray of shape (T, action_dim) where T = env.T (total hours)
+                     and action_dim = number of convex hull extreme points.
+                     Each row is the lambda action vector for that hour.
+        rewards: list of per-step rewards returned by the environment.
+        costs: list of per-step costs returned by the environment.
+    """
+    # Reset environment
+    obs, info = env.reset()
+    state = env._get_state(mode='dict')
+
+    total_hours = env.T  # e.g. 7 * 24 = 168
+    num_days = total_hours // 24
+    action_dim = env.row_liqprod  # number of convex hull vertices
+
+    raw_actions = np.zeros((total_hours, action_dim), dtype=np.float32)
+    rewards = []
+    costs = []
+
+    base_dir = Path().resolve()
+    opt_config_fp = base_dir / "asuopt_config.json"
+    if not opt_config_fp.is_file():
+      raise FileNotFoundError(f"Couldn’t find config.json at {opt_config_fp}")
+    
+    env_id = 'ASU1'
+    env_lookahead = env._get_lookahead_days()
+    optimizer = optimize_ASU(env_id, lookahead=env_lookahead, config_path=opt_config_fp)
+
+    for day in range(num_days):
+        # --- 1. Get current environment state ---
+        state = env._get_state(mode='dict')
+
+        # --- 2. Reset optimizer model and update with current state ---
+        optimizer._reset_model()
+        optimizer.update_state(state)
+
+        # --- 3. Solve the optimization problem ---
+        obj_value = optimizer.solve(solver_name=solver_name, tee=tee)
+
+        # --- 4. Extract optimal lambda values for the first 24 hours ---
+        # extract_optimal_lambda returns {t: {j: lambda_val}} for t=1..24
+        lambda_values = optimizer.extract_optimal_lambda()
+
+        # Also extract the mode (y) to know if the plant is in Liquid_Prod mode.
+        # If not in Liquid_Prod, lambda should be zero (plant is OFF or starting up).
+        mode_active = {}
+        for t in range(1, 25):
+            mode_active[t] = {}
+            for m in optimizer.model.M:
+                mode_active[t][m] = value(optimizer.model.y[m, t])
+
+        # --- 5. Step through the environment for 24 hours ---
+        for hour in range(24):
+            t_opt = hour + 1  # optimizer uses 1-indexed time
+
+            # Build the action vector for this hour
+            action = np.zeros(action_dim, dtype=np.float32)
+
+            if mode_active[t_opt].get('Liquid_Prod', 0) > 0.5:
+                # Plant is in production mode: use the optimized lambda weights
+                for j_idx in range(action_dim):
+                    j_key = j_idx + 1  # optimizer J is 1-indexed
+                    action[j_idx] = lambda_values[t_opt].get(j_key, 0.0)
+            # else: action stays zero (plant is OFF or in startup)
+
+            # Record the action
+            global_hour = day * 24 + hour
+            raw_actions[global_hour] = action
+
+            # Step the environment
+            obs, reward_minus_cost, terminated, truncated, info_step = env.step(action)
+
+            # Convert tensors to floats if needed
+            r = reward_minus_cost.item() if hasattr(reward_minus_cost, 'item') else float(reward_minus_cost)
+            rewards.append(r)
+            costs.append(env.cost)
+
+            if (hasattr(terminated, 'item') and terminated.item()) or terminated:
+                break
+
+        # Check if episode ended mid-day
+        term_flag = terminated.item() if hasattr(terminated, 'item') else terminated
+        if term_flag:
+            break
+
+   #  return raw_actions, rewards, costs
+    return raw_actions
+
+
+def replay_actions(env, raw_actions):
+    """
+    Replay a pre-computed action sequence through the environment.
+    Useful for verifying the optimal solution or comparing against RL agents.
+
+    Args:
+        env: An ASUEnv instance.
+        raw_actions: np.ndarray of shape (T, action_dim), the actions to replay.
+
+    Returns:
+        total_reward: Cumulative reward over the episode.
+        total_cost: Cumulative cost over the episode.
+        env_spec_log: The environment's violation log at episode end.
+    """
+    obs, info = env.reset()
+
+    total_reward = 0.0
+    total_cost = 0.0
+
+    for t in range(raw_actions.shape[0]):
+        action = raw_actions[t]
+        obs, reward_minus_cost, terminated, truncated, info_step = env.step(action)
+
+        r = reward_minus_cost.item() if hasattr(reward_minus_cost, 'item') else float(reward_minus_cost)
+        total_reward += r
+        total_cost += env.cost
+
+        term_flag = terminated.item() if hasattr(terminated, 'item') else terminated
+        if term_flag:
+            break
+
+    return total_reward, total_cost, env.env_spec_log

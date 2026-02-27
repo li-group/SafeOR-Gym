@@ -57,7 +57,23 @@ class ASUEnv(gym.Env):
         "fixed_cost": list,     # List with one float (e.g., [36])
         "dynamic_cost": list,   # List with one float (e.g., [0.24192])
         "IV_i": dict,           # Dict of product: float (initial inventory)
-        "liq_prod_data": dict   # Dict: {product -> {str(int) -> float}}
+        "liq_prod_data": dict,   # Dict: {product -> {str(int) -> float}}
+        "delta": dict,
+        "products": list,
+        "fixed_cost": list,
+        "dynamic_cost": list,
+        "gamma": dict,
+        "y_i": dict,
+        "IV_i": dict,
+        "IV_u": dict,
+        "IV_l": dict,
+        "IV_f": dict,
+        "theta_minon": list,
+        "theta_minoff": list,
+        "theta_startup": list,
+        "total_hours": list,
+        "interval_hours": list,
+        "z_history": dict
     }
 
     def __init__(self, env_id: str, **kwargs: Any) -> None:
