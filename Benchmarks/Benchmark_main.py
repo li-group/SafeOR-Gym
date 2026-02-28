@@ -1,4 +1,4 @@
-# Run this benchmarking after installing the omnisafe version in https://github.com/li-group/omnisafe.git
+
 import os
 import sys
 import yaml
@@ -41,7 +41,7 @@ def run_experiments(args):
 
     # Target environment
     eg.add('env_id', [args.env_id]) 
-    env = SafeOR_Gym.safeor_make(args.env_id,args.environment_config_file_path)
+    env = SafeOR_Gym.safeor_make(args.env_id)
     T = env._env.T
     # GPU configuration
     available_gpus = list(range(torch.cuda.device_count()))
@@ -127,4 +127,5 @@ def main():
 if __name__ == "__main__":
     main()
     
+
 
