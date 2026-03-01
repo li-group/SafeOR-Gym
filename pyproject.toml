@@ -9,15 +9,6 @@ description = "SafeOR-Gym: Safe RL benchmark environments for operations researc
 readme = "README.md"
 requires-python = ">=3.8"
 
-dependencies = [
-  "gymnasium",
-  "numpy",
-  "torch>=1.10",
-  "pyyaml",
-  "omnisafe",
-  "scipy",
-  "pyomo",
-]
 
 [project.optional-dependencies]
 # Only include if some envs truly require these at runtime
