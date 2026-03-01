@@ -38,8 +38,8 @@ The key contributions of this project:
 ```bash
 git clone https://github.com/li-group/SafeOR-Gym.git
 cd SafeOR-Gym
-conda activate safeorenv  
 conda env create -f environment.yml
+conda activate safeorenv  
 pip install -e .
 ```
 Note: This benchmarking part of the repository uses a modified [version](https://github.com/li-group/omnisafe/tree/main) of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
