@@ -1,2 +1,0 @@
-pyomo
-setuptools==65.5.1
