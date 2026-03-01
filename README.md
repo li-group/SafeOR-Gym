@@ -36,13 +36,11 @@ The key contributions of this project:
 ### Install
 
 ```bash
-conda create -n safeorenv python=3.10
-conda activate safeorenv
 git clone https://github.com/li-group/SafeOR-Gym.git
 cd SafeOR-Gym
+conda activate safeorenv  
+conda env create -f environment.yml
 pip install -e .
-pip uninstall -y numpy pandas
-pip install numpy pandas
 ```
 Note: This benchmarking part of the repository uses a modified [version](https://github.com/li-group/omnisafe/tree/main) of [OmniSafe](https://github.com/PKU-Alignment/omnisafe), which includes a few minor changes. The core algorithm implementations remain unchanged.
 ## Usage
