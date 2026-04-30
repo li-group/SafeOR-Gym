@@ -85,7 +85,7 @@ Each environment has its own folder containing the relevant code. To run and ben
 | Resource Task Network                        | `rtn-v0`                 |
 | State Task Network                           | `stn-v0`                 |
 | Unit Commitment                              | `UC-v0`, `UC-v1`         |
-
+<!--
 ## Benchmarking Setup (ExperimentGrid)
 
 For bencharmarking, we use a modified [version](https://github.com/li-group/omnisafe/tree/main) of Omnisafe with the core algorithm implementations retained. This repository uses `ExperimentGrid` to manage and evaluate SafeRL training experiments. Below is an overview of its key functionality and a sample code block for running benchmarks.
@@ -183,6 +183,65 @@ python main.py \
   --num_episodes <EVAL_EPISODES> \
   [--use_tensorboard]
 ```
+-->
+## Benchmarking
+
+### Standard OmniSafe
+
+SafeOR-Gym environments are compatible with standard OmniSafe workflows. You can run a standard benchmark using the Benchmark_main.py:
+
+```bash
+python Benchmark_main.py --env_id Battery-v0 --episodes_per_epoch 1 --total_epochs 1
+```
+###3 Available Arguments
+
+The `Benchmark_main.py` script supports the following arguments:
+
+**Required:**
+- `--env_id` *(str)*: Environment ID (e.g., `Battery-v0`)
+- `--episodes_per_epoch` *(int)*: Number of episodes per epoch
+- `--total_epochs` *(int)*: Total number of training epochs
+
+**Optional:**
+- `--seed` *(int, default=10)*: Random seed
+- `--use_wandb`: Enable Weights & Biases logging
+- `--use_tensorboard`: Enable TensorBoard logging (default: enabled)
+- `--vector_env_nums` *(int, default=1)*: Number of parallel environments
+- `--torch_threads` *(int, default=1)*: Number of CPU threads
+- `--device` *(str)*: Device (e.g., `cpu`, `cuda:0`) (auto-selected if not provided)
+- `--gpu_id` *(int, default=0)*: GPU ID to use (if CUDA is available)
+- `--num_pool` *(int, default=1)*: ExperimentGrid worker pool size
+- `--compare_num` *(int, default=5)*: Number of algorithms compared during analysis
+- `--num_episodes` *(int, default=10)*: Number of episodes for evaluation
+
+### Extended version of OmniSafe
+
+To provide additional control over configurations, we include an extended [version](https://github.com/li-group/omnisafe/tree/main) of OmniSafe that retains the core algorithm implementations unchanged. We also provide a main.py script to run experiments using this setup. This configuration is used for the experiments reported in the paper.
+
+This setup enables additional flexibility in configuring model and training parameters.
+
+#### Additional Arguments
+
+The `main.py` script supports the following arguments:
+
+**Required:**
+- `--env_id` *(str)*: Environment ID (e.g., `Battery-v0`)
+- `--steps_per_epoch` *(int)*: Number of steps per epoch
+- `--total_epochs` *(int)*: Total number of training epochs
+
+**Optional:**
+- `--environment_config_file_path` *(str)*: Path to environment configuration file
+- `--output_activation_function` *(str)*: Actor output activation (e.g., `tanh`)
+- `--seed` *(int, default=10)*: Random seed
+- `--use_wandb`: Enable Weights & Biases logging
+- `--use_tensorboard`: Enable TensorBoard logging (default: enabled)
+- `--vector_env_nums` *(int, default=1)*: Number of parallel environments
+- `--torch_threads` *(int, default=1)*: Number of CPU threads
+- `--device` *(str)*: Device (e.g., `cpu`, `cuda:0`) (auto-selected if not provided)
+- `--gpu_id` *(int, default=0)*: GPU ID to use
+- `--num_pool` *(int, default=1)*: ExperimentGrid worker pool size
+- `--compare_num` *(int, default=5)*: Number of algorithms compared
+- `--num_episodes` *(int, default=10)*: Number of episodes for evaluation
 ## Cite us
 <a name="citation"></a>
 Cite us ❤️
