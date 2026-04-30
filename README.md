@@ -53,11 +53,12 @@ env_rtn = SafeOR_Gym.safeor_make('rtn-v0')
 env_stn = SafeOR_Gym.safeor_make('stn-v0',config_file_path) 
 ```
 The environment can be then be used with other SafeRL libraries that accept CMDP classes. Furthermore importing the package automatically adds the env-id to the Omnisafe registry making it easy to access Omnisafe algorithms. 
-To help researchers we also have a function optimal_simulation_actions for our environments which provides optimal actions for the entire horion starting from the first time period in the format [T,action_size]: 
+<!--To help researchers we also have a function optimal_simulation_actions for our environments which provides optimal actions for the entire horion starting from the first time period in the format [T,action_size]: 
 ```python
 import SafeOR_Gym
 actions = SafeOR_Gym.optimal_simulation_actions(env,'gurobi')
 ```
+-->
 ## Environments
 
 - **Production Scheduling in Air Separation Unit (ASUEnv)**: Optimize liquid production to minimize electricity and production costs, while fulfilling demand and respecting unit capacities across time.
