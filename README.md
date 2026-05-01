@@ -193,7 +193,7 @@ SafeOR-Gym environments are compatible with standard OmniSafe workflows. You can
 ```bash
 python Benchmark_main.py --env_id Battery-v0 --episodes_per_epoch 1 --total_epochs 1
 ```
-###3 Available Arguments
+#### Available Arguments
 
 The `Benchmark_main.py` script supports the following arguments:
 
