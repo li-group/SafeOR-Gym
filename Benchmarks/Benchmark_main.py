@@ -112,7 +112,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--gpu_id", type=int, default=0, help="GPU id to use (only relevant if CUDA available).")
 
     p.add_argument("--num_pool", type=int, default=1, help="ExperimentGrid worker pool size.")
-    p.add_argument("--compare_num", type=int, default=5, help="Compare_num for eg.analyze.")
+    p.add_argument("--compare_num", type=int, default=8, help="Compare_num for eg.analyze.")
     p.add_argument("--num_episodes", type=int, default=10, help="Episodes for evaluation.")
 
     return p
