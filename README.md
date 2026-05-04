@@ -38,6 +38,7 @@ The key contributions of this project:
 ```bash
 git clone https://github.com/li-group/SafeOR-Gym.git
 cd SafeOR-Gym
+git checkout v0.1   
 conda env create -f environment.yml
 conda activate safeorenv  
 pip install -e .
