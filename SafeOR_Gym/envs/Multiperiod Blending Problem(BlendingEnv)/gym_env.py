@@ -111,6 +111,14 @@ class BlendEnv(gym.Env):
                             "Penalties/n_demand bound violation:lower":0,"Penalties/n_demand bound violation:upper":0,
                             "Performances/units_sold": 0, "Performances/units_bought": 0, "Performances/rew_sold": 0, "Performances/rew_bought": 0
                             }
+        
+        self.env_type = 'deterministic'
+
+        self.schedule_sigma = 0.0
+        self.schedule_rho = 0.0
+        self.schedule_spike_prob = 0.0
+        self.schedule_spike_scale = 0.0
+        
         self.T = 6
         self.alpha = 0
         self.beta = 0
@@ -160,11 +168,21 @@ class BlendEnv(gym.Env):
         print(self.connections)
         self.sources, self.blenders, self.demands = get_sbp(self.connections)
         self.properties = list(self.sigma[self.sources[0]].keys())
+        self.base_tau0 = copy.deepcopy(self.tau0)
+        self.base_delta0 = copy.deepcopy(self.delta0)
+
+        self.effective_sigma = (
+            self.schedule_sigma / np.sqrt(1 - self.schedule_rho**2)
+            if self.schedule_rho > 0 else self.schedule_sigma
+        )
+        self.schedule_bound_factor = 1 + 4 * self.effective_sigma
         self.reset() # sets state, reward, t, done
         
         self.flatt_state, self.mapping_obs = flatten_and_track_mappings(self.state)
         obs_high_list = [0] * len(self.flatt_state)
         print(self.mapping_obs)
+        
+
         for(k,val) in self.mapping_obs:
             if(val[0]=="sources"):
                 obs_high_list[k] = self.s_inv_ub[val[1]]
@@ -175,9 +193,9 @@ class BlendEnv(gym.Env):
             elif(val[0]=="properties"):
                 obs_high_list[k] = 100
             elif(val[0]=="sources_avail"):
-                obs_high_list[k] = max(self.tau0[val[1]].values())
+                obs_high_list[k] = max(self.base_tau0[val[1]].values())*self.schedule_bound_factor
             elif(val[0]=="demands_avail"):
-                obs_high_list[k] = max(self.delta0[val[1]].values())
+                obs_high_list[k] = max(self.base_delta0[val[1]].values())*self.schedule_bound_factor
             elif(val[0]=='t'):
                 obs_high_list[k] = self.T
 
@@ -206,12 +224,73 @@ class BlendEnv(gym.Env):
         }    
         self.state["t"] = self.t
     
+    def apply_stochasticity_schedule(self):
+        
+        # 🔹 Reset from base
+        self.tau0 = copy.deepcopy(self.base_tau0)
+        self.delta0 = copy.deepcopy(self.base_delta0)
+
+        # 🔹 Early exit
+        if self.env_type == 'deterministic':
+            return
+
+        sigma = self.schedule_sigma
+        rho = self.schedule_rho
+
+        # 🔥 Apply to BOTH schedules
+        for schedule, base_schedule, is_demand in [
+            (self.delta0, self.base_delta0, True),   # demand
+            (self.tau0, self.base_tau0, False)       # supply
+        ]:
+            for entity in schedule:
+                delta_prev = 0.0
+
+                for t in range(self.T):
+                    base = base_schedule[entity].get(str(t), 0)
+
+                    # ❗ skip rules
+                    if is_demand and t == 0:
+                        continue
+
+                    if not is_demand and t == self.T - 1:
+                        continue
+
+                    # --- bounded noise ---
+                    noise = np.random.normal(0, sigma)
+                    noise = np.clip(noise, -4 * sigma, 4 * sigma)
+
+                    # --- IID vs non-IID ---
+                    if self.env_type == 'stochastic-iid':
+                        delta = noise
+                    elif self.env_type == 'stochastic-noniid':
+                        delta = rho * delta_prev + noise
+                    else:
+                        delta = 0.0
+
+                    # 🔥 spike (added to delta)
+                    if self.schedule_spike_prob > 0 and np.random.rand() < self.schedule_spike_prob:
+                        delta += self.schedule_spike_scale
+
+                    # --- multiplicative update ---
+                    val = base * (1 + delta)
+
+                    # --- enforce bounds ---
+                    val = max(val, 0)
+
+                    # (optional: soft upper bound for safety)
+                    val = min(val, base * self.schedule_bound_factor)
+
+                    schedule[entity][str(t)] = val
+
+                    delta_prev = delta
+
     def reset(self, seed=0,options = None):
         ''' Reset the environment to the initial state'''
         self.t = self.reward_ep = 0
         self.cost_ep = 0
         self.reward = 0
         self.cost = 0
+        self.apply_stochasticity_schedule()
         self.get_new_start_state()
         self.truncated = self.terminated = False
         self.flatt_state, _ = flatten_and_track_mappings(self.state)

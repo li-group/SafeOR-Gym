@@ -1,5 +1,6 @@
 {
     "env_init_cfgs": {
+        "env_type": "deterministic",
         "action_sample": {
     "addgen": {
         "i1": {

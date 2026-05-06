@@ -10,6 +10,7 @@ import os, sys
 from utils import assign_env_config,flatten_and_track_mappings,reconstruct_dict,convert_dict_to_tuple_keys,flatten_dict
 from typing import Any, ClassVar, List, Tuple, Optional, Dict
 import random
+import copy
 class Generator_transmission_expansion_env(gym.Env):
     '''
     The capacity expansion problem is a combinatorial optimization problem that involves determining the optimal capacities of system components—
@@ -93,6 +94,12 @@ class Generator_transmission_expansion_env(gym.Env):
         self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
         
         #Default parameters
+        self.env_type = 'deterministic'
+        self.demand_sigma = 0.0
+        self.demand_rho = 0.0
+        self.demand_spike_prob = 0.0
+        self.demand_spike_scale = 0.0
+
         self.D = 10
         self.P = 10
         self.eps = 10**(-3)
@@ -113,12 +120,17 @@ class Generator_transmission_expansion_env(gym.Env):
         self.transmission_lines = list(self.tlcap.keys())
         self.regions = list(self.demand.keys())
         print(self.action_sample)
+        self.base_demand = copy.deepcopy(self.demand)
+        self.effective_sigma = (self.demand_sigma / np.sqrt(1 - self.demand_rho**2)
+        if self.demand_rho > 0 else self.demand_sigma)
+        self.max_demand_value = (max(max(region_demand.values()) for region_demand in self.base_demand.values()))* (1 + 4*self.effective_sigma)
         self.reset()
         self.flatt_state, self.mapping_obs = flatten_and_track_mappings(self.state)
         self.max_gen = max(v for inner_dict in self.maxgen.values() for v in inner_dict.values())
         self.max_tl = 1
-        self.max_demand_value = max(max(region_demand.values()) for region_demand in self.demand.values())
-        self.obs_high = np.concatenate([np.repeat(self.max_gen,len(self.generators)*len(self.regions)),np.repeat(self.max_tl,len(self.transmission_lines)),np.repeat(self.max_demand_value,len(self.regions)*self.window_len),np.repeat(self.T,1)])
+        
+        
+        self.obs_high = np.concatenate([np.repeat(self.max_gen,len(self.generators)*len(self.regions)),np.repeat(self.max_tl,len(self.transmission_lines)),np.repeat(self.max_demand_value,len(self.regions)*self.window_len),np.repeat(self.T,1)]).astype(np.float32)
         self.observation_space = Box(low=0, high=self.obs_high, shape=(self.flatt_state.shape[0],))
         self.flatt_act_sample, self.mapping_act = flatten_and_track_mappings(self.action_sample)
         low_list = [0] * len(self.mapping_act)
@@ -140,12 +152,59 @@ class Generator_transmission_expansion_env(gym.Env):
                       "Dem":{(r,k):self.demand[r][str(k+1)] if k+1<self.T else 0 for r in self.regions for k in range(0,self.window_len)}
                       }
         self.state["t"] = self.t
+    
+    def apply_stochasticity_demand(self):
+    
+        # 🔹 Always reset from base
+        self.demand = copy.deepcopy(self.base_demand)
+
+        # 🔹 Early exit (clean + efficient)
+        if self.env_type == 'deterministic':
+            return
+
+        sigma = self.demand_sigma
+        rho = self.demand_rho
+
+        for r in self.regions:
+            delta_prev = 0.0
+
+            for t in range(1, self.T + 1):
+                base = self.base_demand[r][str(t)]
+
+                # --- bounded noise ---
+                noise = np.random.normal(0, sigma)
+                noise = np.clip(noise, -4 * sigma, 4 * sigma)
+
+                # --- IID vs non-IID ---
+                if self.env_type == 'stochastic-iid':
+                    delta = noise
+                elif self.env_type == 'stochastic-noniid':
+                    delta = rho * delta_prev + noise
+                else:
+                    delta = 0.0
+
+                # 🔥 --- SPIKE (FIXED: applied to delta, not val) ---
+                if self.demand_spike_prob > 0 and np.random.rand() < self.demand_spike_prob:
+                    delta += self.demand_spike_scale
+
+                # --- apply multiplicative noise ---
+                val = base * (1 + delta)
+
+                # --- enforce bounds ---
+                val = min(val, self.max_demand_value)
+                val = max(val, 0)
+
+                self.demand[r][str(t)] = val
+
+                # 🔹 update memory (AFTER spike adjustment)
+                delta_prev = delta
     def reset(self, seed = 0, options = None):
         '''Reset the environment to the initial state'''
         self.t = self.reward_ep = 0
         self.cost_ep = 0
         self.cost = 0
-        self.reward = 0
+        self.reward = 0 
+        self.apply_stochasticity_demand()
         self.get_new_start_state()
         self.truncated  = self.terminated = False
         self.flatt_state, _ = flatten_and_track_mappings(self.state)
