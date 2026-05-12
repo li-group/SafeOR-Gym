@@ -94,11 +94,20 @@ class Generator_transmission_expansion_env(gym.Env):
         self._device = kwargs.get('device', 'cuda' if th.cuda.is_available() else 'cpu')
         
         #Default parameters
-        self.env_type = 'deterministic'
-        self.demand_sigma = 0.0
-        self.demand_rho = 0.0
-        self.demand_spike_prob = 0.0
-        self.demand_spike_scale = 0.0
+        self.env_type = 'deterministic'   # or 'stochastic-iid' / 'stochastic-arimax'
+        #self.obs_type = 'forecast'        # or 'scenario'
+        self.obs_type = 'scenario'        # or 'scenario'
+
+        # Base distribution
+        self.base_low_factor = 0.8
+        self.base_high_factor = 1.2
+
+        # Noise
+        self.noise_sigma = 0.05
+        self.n_scenario = 1   # default
+
+        self.rho_ARIMAX = 0.7   # typical value (0.5–0.9)
+        
 
         self.D = 10
         self.P = 10
@@ -121,16 +130,23 @@ class Generator_transmission_expansion_env(gym.Env):
         self.regions = list(self.demand.keys())
         print(self.action_sample)
         self.base_demand = copy.deepcopy(self.demand)
-        self.effective_sigma = (self.demand_sigma / np.sqrt(1 - self.demand_rho**2)
-        if self.demand_rho > 0 else self.demand_sigma)
-        self.max_demand_value = (max(max(region_demand.values()) for region_demand in self.base_demand.values()))* (1 + 4*self.effective_sigma)
+        self.current_scenario_demand = copy.deepcopy(self.demand)
+        self.scenarios = {} 
+        base_max = max(
+        max(region_demand.values())
+        for region_demand in self.base_demand.values()
+        )
+
+        self.max_demand_value = (
+            base_max * self.base_high_factor
+            + 4 * self.noise_sigma * base_max
+        )
         self.reset()
         self.flatt_state, self.mapping_obs = flatten_and_track_mappings(self.state)
         self.max_gen = max(v for inner_dict in self.maxgen.values() for v in inner_dict.values())
         self.max_tl = 1
-        
-        
-        self.obs_high = np.concatenate([np.repeat(self.max_gen,len(self.generators)*len(self.regions)),np.repeat(self.max_tl,len(self.transmission_lines)),np.repeat(self.max_demand_value,len(self.regions)*self.window_len),np.repeat(self.T,1)]).astype(np.float32)
+    
+        self.obs_high = np.concatenate([np.repeat(self.max_gen,len(self.generators)*len(self.regions)),np.repeat(self.max_tl,len(self.transmission_lines)),np.repeat(self.max_demand_value,self.n_scenario*len(self.regions)*self.window_len),np.repeat(self.T,1)]).astype(np.float32)
         self.observation_space = Box(low=0, high=self.obs_high, shape=(self.flatt_state.shape[0],))
         self.flatt_act_sample, self.mapping_act = flatten_and_track_mappings(self.action_sample)
         low_list = [0] * len(self.mapping_act)
@@ -148,63 +164,178 @@ class Generator_transmission_expansion_env(gym.Env):
         
     def get_new_start_state(self):
         '''Function to get a new start state.'''
-        self.state = {"num_gen" : {(i,r):0 for i in self.generators for r in self.regions}, "num_tl":{l:0 for l in self.transmission_lines},
-                      "Dem":{(r,k):self.demand[r][str(k+1)] if k+1<self.T else 0 for r in self.regions for k in range(0,self.window_len)}
-                      }
+        self.state = {"num_gen" : {(i,r):0 for i in self.generators for r in self.regions}, "num_tl":{l:0 for l in self.transmission_lines}}
+        if(self.env_type == 'deterministic' or self.obs_type == 'forecast'):
+            self.state["Dem"] = {(n_s, r, k):self.base_demand[r][str(k+1)] if k+1<=self.T else 0 for r in self.regions for k in range(0,self.window_len) for n_s in range(self.n_scenario)}
+            
+        else:
+            self.state["Dem"]=  {
+            (n_s, r, k): (
+                self.scenarios[r][str(k+1)][n_s]
+                if k+1 <= self.T else 0
+            )
+            for n_s in range(self.n_scenario)
+            for r in self.regions
+            for k in range(self.window_len)
+        }
+        
+                
         self.state["t"] = self.t
     
-    def apply_stochasticity_demand(self):
     
-        # 🔹 Always reset from base
-        self.demand = copy.deepcopy(self.base_demand)
+    
 
-        # 🔹 Early exit (clean + efficient)
+    def generate_scenarios_iid(self):
+        '''
+        Generate scenario set for the entire episode.
+        scenarios[r][t] = [s0, s1, ..., s_{n_scenario-1}]
+        '''
+
+        self.scenarios = {}
+
+        for r in self.regions:
+            self.scenarios[r] = {}
+
+            for t in range(1, self.T + 1):
+
+                base = self.base_demand[r][str(t)]
+
+                scenario_list = []
+
+                for _ in range(self.n_scenario):
+
+                    # --- Step 1: sample α (uniform base) ---
+                    alpha = np.random.uniform(
+                        self.base_low_factor * base,
+                        self.base_high_factor * base
+                    )
+
+                    # --- Step 2: add Gaussian noise ---
+                    noise = np.random.normal(
+                        0,
+                        self.noise_sigma * base
+                    )
+
+                    # --- Step 3: final demand ---
+                    val = max(0.0, alpha + noise)
+
+                    scenario_list.append(val)
+
+                self.scenarios[r][str(t)] = scenario_list
+    
+    def generate_scenarios_arimax(self):
+        '''
+        Generate ARIMAX-based scenario set for the entire episode.
+        scenarios[r][t] = [s0, s1, ..., s_{n_scenario-1}]
+        '''
+
+        self.scenarios = {}
+
+        for r in self.regions:
+            self.scenarios[r] = {}
+
+            # initialize storage for all t
+            for t in range(1, self.T + 1):
+                self.scenarios[r][str(t)] = [0.0] * self.n_scenario
+
+            # generate each scenario trajectory independently
+            for s in range(self.n_scenario):
+
+                prev = self.base_demand[r][str(1)]   # seed
+
+                for t in range(1, self.T + 1):
+
+                    base = self.base_demand[r][str(t)]
+
+                    if t == 1:
+                        val = base
+                    else:
+                        noise = np.random.normal(
+                            0,
+                            self.noise_sigma * base
+                        )
+
+                        val = (
+                            self.rho_ARIMAX * prev
+                            + (1 - self.rho_ARIMAX) * base
+                            + noise
+                        )
+
+                    val = max(0.0, val)
+
+                    self.scenarios[r][str(t)][s] = val
+
+                    prev = val
+
+    def apply_stochasticity_demand(self):
+
+        # --- Deterministic ---
         if self.env_type == 'deterministic':
             return
 
-        sigma = self.demand_sigma
-        rho = self.demand_rho
+        # --- IID stochastic ---
+        elif self.env_type == 'stochastic-iid':
 
-        for r in self.regions:
-            delta_prev = 0.0
+            for r in self.regions:
+                for t in range(1, self.T + 1):
 
-            for t in range(1, self.T + 1):
-                base = self.base_demand[r][str(t)]
+                    base = self.base_demand[r][str(t)]
 
-                # --- bounded noise ---
-                noise = np.random.normal(0, sigma)
-                noise = np.clip(noise, -4 * sigma, 4 * sigma)
+                    alpha = np.random.uniform(
+                        self.base_low_factor * base,
+                        self.base_high_factor * base
+                    )
 
-                # --- IID vs non-IID ---
-                if self.env_type == 'stochastic-iid':
-                    delta = noise
-                elif self.env_type == 'stochastic-noniid':
-                    delta = rho * delta_prev + noise
-                else:
-                    delta = 0.0
+                    noise = np.random.normal(
+                        0,
+                        self.noise_sigma * base
+                    )
 
-                # 🔥 --- SPIKE (FIXED: applied to delta, not val) ---
-                if self.demand_spike_prob > 0 and np.random.rand() < self.demand_spike_prob:
-                    delta += self.demand_spike_scale
+                    val = max(0.0, alpha + noise)
 
-                # --- apply multiplicative noise ---
-                val = base * (1 + delta)
+                    self.current_scenario_demand[r][str(t)] = val
 
-                # --- enforce bounds ---
-                val = min(val, self.max_demand_value)
-                val = max(val, 0)
+        # --- ARIMAX stochastic (NON-IID) ---
+        elif self.env_type == 'stochastic-arimax':
 
-                self.demand[r][str(t)] = val
+            for r in self.regions:
 
-                # 🔹 update memory (AFTER spike adjustment)
-                delta_prev = delta
+                prev = self.base_demand[r][str(1)]   # seed
+
+                for t in range(1, self.T + 1):
+
+                    base = self.base_demand[r][str(t)]
+
+                    if t == 1:
+                        val = base
+                    else:
+                        noise = np.random.normal(
+                            0,
+                            self.noise_sigma * base
+                        )
+
+                        val = (
+                            self.rho_ARIMAX * prev
+                            + (1 - self.rho_ARIMAX) * base
+                            + noise
+                        )
+
+                    val = max(0.0, val)
+
+                    self.current_scenario_demand[r][str(t)] = val
+                    prev = val
     def reset(self, seed = 0, options = None):
         '''Reset the environment to the initial state'''
         self.t = self.reward_ep = 0
         self.cost_ep = 0
         self.cost = 0
         self.reward = 0 
+        self.current_scenario_demand = copy.deepcopy(self.base_demand)
         self.apply_stochasticity_demand()
+        if self.env_type == 'stochastic-iid':
+            self.generate_scenarios_iid()
+        elif self.env_type == 'stochastic-arimax':
+            self.generate_scenarios_arimax()
         self.get_new_start_state()
         self.truncated  = self.terminated = False
         self.flatt_state, _ = flatten_and_track_mappings(self.state)
@@ -253,6 +384,7 @@ class Generator_transmission_expansion_env(gym.Env):
                     tl_reward-=self.installcost["transmission"][l]
         return tl_reward
 
+    
     def compute_cost_demand_satisfaction(self,action):
         '''Function to check the violations of the demand constraints. If the demand is not satisfied, we calculate a penalty for the violation. 
         The penalty is the sum of a scaled L0 violation and a scaled L2 violation when the demand is violated.'''
@@ -261,10 +393,10 @@ class Generator_transmission_expansion_env(gym.Env):
             total_avail = sum(self.state["num_gen"][(i,r)]*self.gencap[i] for i in self.generators)
             if(len(self.transmission_lines)>0):
                 total_avail+=sum(action["powflow_tup"][l] for l in action["powflow_tup"].keys() if l[1]==r)
-            if(self.state["Dem"][r,0]> total_avail):
-                dem_cost+=self.D*(self.state["Dem"][r,0]-total_avail)**2+self.P
+            if(self.current_scenario_demand[r][str(self.t)]> total_avail):
+                dem_cost+=self.D*(self.current_scenario_demand[r][str(self.t)]-total_avail)**2+self.P
                 self.pens_step['Number of Demand violations']+=1
-                self.pens_step['Total penalty: Demand violations']+=self.D*(self.state["Dem"][r,0]-total_avail)**2+self.P
+                self.pens_step['Total penalty: Demand violations']+=self.D*(self.current_scenario_demand[r][str(self.t)]-total_avail)**2+self.P
         return dem_cost
 
     def sanitize_action(self,action_scaled):
@@ -289,12 +421,29 @@ class Generator_transmission_expansion_env(gym.Env):
         return action
     def update_demand(self):
         '''Function to update the demand for each region. The demand is updated to the next time period if exists else 0.'''
-        for r in self.regions:
-            for k in range(self.window_len):
-                if(self.t+k+1<=self.T):
-                    self.state["Dem"][r,k] = self.demand[r][str(self.t+k+1)]
-                else:
-                    self.state["Dem"][r,k] = 0
+        if(self.env_type == 'deterministic' or self.obs_type == 'forecast'):
+            for n_s in range(self.n_scenario):
+                for r in self.regions:
+                    for k in range(self.window_len):
+
+                        t_idx = self.t + k + 1
+
+                        if t_idx <= self.T:
+                            self.state["Dem"][(n_s, r, k)] = self.base_demand[r][str(t_idx)]
+                        else:
+                            self.state["Dem"][(n_s, r, k)] = 0
+
+        else:
+            for n_s in range(self.n_scenario):
+                for r in self.regions:
+                    for k in range(self.window_len):
+
+                        t_idx = self.t + k + 1
+
+                        if t_idx <= self.T:
+                            self.state["Dem"][(n_s, r, k)] = self.scenarios[r][str(t_idx)][n_s]
+                        else:
+                            self.state["Dem"][(n_s, r, k)] = 0
     def step(self, action_scaled: th.Tensor):
         self.t += 1
         self.state["t"] = self.t
